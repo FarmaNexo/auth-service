@@ -1,0 +1,32 @@
+# configs/config.development.yaml
+# Configuración para el ambiente DEVELOPMENT desplegado
+# Los valores sensibles vienen de variables de entorno
+environment: development
+
+server:
+  port: 4001
+  host: "0.0.0.0"
+  read_timeout: 30s
+  write_timeout: 30s
+  idle_timeout: 60s
+
+database:
+  host: ${DB_HOST}
+  port: 5432
+  user: ${DB_USER}
+  password: ${DB_PASSWORD}
+  dbname: auth_db_dev
+  sslmode: disable
+  max_open_conns: 25
+  max_idle_conns: 10
+  conn_max_lifetime: 5m
+
+jwt:
+  secret: ${JWT_SECRET}
+  access_token_duration: 1h
+  refresh_token_duration: 168h # 7 días
+  issuer: "farmanexo-auth-service-dev"
+
+log:
+  level: debug
+  encoding: console
