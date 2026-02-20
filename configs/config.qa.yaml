@@ -1,0 +1,30 @@
+# configs/config.qa.yaml
+environment: qa
+
+server:
+  port: 4001
+  host: "0.0.0.0"
+  read_timeout: 20s
+  write_timeout: 20s
+  idle_timeout: 45s
+
+database:
+  host: ${DB_HOST}
+  port: 5432
+  user: ${DB_USER}
+  password: ${DB_PASSWORD}
+  dbname: auth_db_qa
+  sslmode: require
+  max_open_conns: 50
+  max_idle_conns: 25
+  conn_max_lifetime: 8m
+
+jwt:
+  secret: ${JWT_SECRET}
+  access_token_duration: 30m
+  refresh_token_duration: 120h # 5 días
+  issuer: "farmanexo-auth-service-qa"
+
+log:
+  level: debug
+  encoding: json
