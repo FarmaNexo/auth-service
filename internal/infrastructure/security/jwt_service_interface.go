@@ -13,9 +13,12 @@ type JWTService interface {
 	// GenerateRefreshToken genera un token de refresco
 	GenerateRefreshToken(userID string) (token string, expiresAt time.Time, tokenID string, err error)
 
-	// ValidateAccessToken valida un token de acceso y retorna userID y role
-	ValidateAccessToken(token string) (userID, role string, err error)
+	// ValidateAccessToken valida un token de acceso y retorna userID, role y jti
+	ValidateAccessToken(token string) (userID, role, jti string, err error)
 
 	// ValidateRefreshToken valida un token de refresco
 	ValidateRefreshToken(token string) (userID, tokenID string, err error)
+
+	// GetAccessTokenExpiration parsea un access token y retorna su fecha de expiración
+	GetAccessTokenExpiration(token string) (time.Time, error)
 }

@@ -15,6 +15,8 @@ import (
 	"github.com/farmanexo/auth-service/internal/application/postprocessors"
 	"github.com/farmanexo/auth-service/internal/application/preprocessors"
 	"github.com/farmanexo/auth-service/internal/application/validators"
+	"github.com/farmanexo/auth-service/internal/infrastructure/cache"
+	"github.com/farmanexo/auth-service/internal/infrastructure/messaging"
 	"github.com/farmanexo/auth-service/internal/infrastructure/persistence/postgres"
 	"github.com/farmanexo/auth-service/internal/infrastructure/security"
 	"github.com/farmanexo/auth-service/internal/presentation/dto/responses"
@@ -54,7 +56,7 @@ import (
 // @description                 JWT Authorization header using the Bearer scheme. Example: "Bearer {token}"
 
 // @tag.name         Authentication
-// @tag.description  Endpoints de autenticación y gestión de usuarios
+// @tag.description  Endpoints de autenticación
 
 // @tag.name         Health
 // @tag.description  Endpoints de salud del servicio
@@ -100,6 +102,25 @@ func main() {
 	)
 
 	// ========================================
+	// REDIS
+	// ========================================
+	redisClient, err := cache.NewRedisClient(cfg.Redis, logger)
+	if err != nil {
+		logger.Fatal("Error conectando a Redis", zap.Error(err))
+	}
+
+	tokenBlacklist := cache.NewRedisTokenBlacklist(redisClient, logger)
+	rateLimiter := cache.NewRedisRateLimiter(redisClient, logger)
+
+	// ========================================
+	// SQS EVENT PUBLISHER
+	// ========================================
+	eventPublisher, err := messaging.NewSQSEventPublisher(cfg.AWS, cfg.SQS, logger)
+	if err != nil {
+		logger.Fatal("Error inicializando SQS EventPublisher", zap.Error(err))
+	}
+
+	// ========================================
 	// MEDIATOR
 	// ========================================
 	med := mediator.NewMediator()
@@ -111,6 +132,7 @@ func main() {
 	// Register Handler
 	registerUserHandler := handlers.NewRegisterUserHandler(
 		userRepo,
+		eventPublisher,
 		logger,
 	)
 	mediator.RegisterHandler(med, registerUserHandler)
@@ -120,6 +142,8 @@ func main() {
 		userRepo,
 		tokenRepo,
 		jwtService,
+		eventPublisher,
+		rateLimiter,
 		logger,
 	)
 	mediator.RegisterHandler(med, loginHandler)
@@ -133,16 +157,12 @@ func main() {
 	)
 	mediator.RegisterHandler(med, refreshTokenHandler)
 
-	// Get Profile Handler
-	getProfileHandler := handlers.NewGetProfileHandler(
-		userRepo,
-		logger,
-	)
-	mediator.RegisterHandler(med, getProfileHandler)
-
 	// Logout Handler
 	logoutHandler := handlers.NewLogoutHandler(
 		tokenRepo,
+		tokenBlacklist,
+		jwtService,
+		eventPublisher,
 		logger,
 	)
 	mediator.RegisterHandler(med, logoutHandler)
@@ -167,7 +187,7 @@ func main() {
 	med.RegisterPostProcessor(auditPostProcessor)
 
 	logger.Info("Mediator configurado",
-		zap.Int("handlers", 5),
+		zap.Int("handlers", 4),
 		zap.Int("validators", 2),
 		zap.Int("preprocessors", 1),
 		zap.Int("postprocessors", 1),
@@ -176,13 +196,14 @@ func main() {
 	// ========================================
 	// MIDDLEWARES
 	// ========================================
-	authMiddleware := middlewares.NewAuthMiddleware(jwtService, logger)
+	authMiddleware := middlewares.NewAuthMiddleware(jwtService, tokenBlacklist, logger)
+	rateLimitMiddleware := middlewares.NewRateLimitMiddleware(rateLimiter, jwtService, logger)
 
 	// ========================================
 	// CONTROLADORES Y RUTAS
 	// ========================================
 	authController := controllers.NewAuthController(med, logger)
-	router := routes.SetupRoutes(authController, authMiddleware)
+	router := routes.SetupRoutes(authController, authMiddleware, rateLimitMiddleware)
 
 	// ========================================
 	// SERVIDOR HTTP
@@ -219,6 +240,11 @@ func main() {
 
 	if err := server.Shutdown(ctx); err != nil {
 		logger.Error("Error en shutdown", zap.Error(err))
+	}
+
+	// Cerrar conexión Redis
+	if err := redisClient.Close(); err != nil {
+		logger.Error("Error cerrando conexión Redis", zap.Error(err))
 	}
 
 	logger.Info("Servidor detenido exitosamente")

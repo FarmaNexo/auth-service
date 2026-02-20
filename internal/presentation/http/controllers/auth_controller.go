@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/farmanexo/auth-service/internal/application/commands"
-	"github.com/farmanexo/auth-service/internal/application/queries"
 	"github.com/farmanexo/auth-service/internal/presentation/dto/requests"
 	"github.com/farmanexo/auth-service/internal/presentation/dto/responses"
 	"github.com/farmanexo/auth-service/internal/presentation/http/middlewares"
@@ -94,6 +93,7 @@ func (c *AuthController) Register(w http.ResponseWriter, r *http.Request) {
 // @Success      200      {object}  common.ApiResponse[responses.LoginResponse]  "Login exitoso"
 // @Failure      400      {object}  common.ApiResponse[responses.LoginResponse]  "Error de validación"
 // @Failure      401      {object}  common.ApiResponse[responses.LoginResponse]  "Credenciales inválidas"
+// @Failure      429      {object}  common.ApiResponse[responses.LoginResponse]  "Demasiados intentos"
 // @Failure      500      {object}  common.ApiResponse[responses.LoginResponse]  "Error interno del servidor"
 // @Router       /api/v1/auth/login [post]
 func (c *AuthController) Login(w http.ResponseWriter, r *http.Request) {
@@ -144,6 +144,7 @@ func (c *AuthController) Login(w http.ResponseWriter, r *http.Request) {
 // @Success      200      {object}  common.ApiResponse[responses.LoginResponse]  "Tokens renovados exitosamente"
 // @Failure      400      {object}  common.ApiResponse[responses.LoginResponse]  "Error de validación"
 // @Failure      401      {object}  common.ApiResponse[responses.LoginResponse]  "Token inválido, expirado o revocado"
+// @Failure      429      {object}  common.ApiResponse[responses.LoginResponse]  "Demasiadas solicitudes"
 // @Failure      500      {object}  common.ApiResponse[responses.LoginResponse]  "Error interno del servidor"
 // @Router       /api/v1/auth/refresh [post]
 func (c *AuthController) RefreshToken(w http.ResponseWriter, r *http.Request) {
@@ -181,53 +182,6 @@ func (c *AuthController) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		c.logger.Error("Error ejecutando RefreshTokenCommand", zap.Error(err))
 		c.respondJSON(w, common.InternalServerErrorResponse[responses.LoginResponse](
 			"Error procesando la renovación de token",
-		))
-		return
-	}
-
-	c.respondJSON(w, response)
-}
-
-// GetProfile godoc
-// @Summary      Obtener perfil de usuario
-// @Description  Retorna la información del usuario autenticado. Requiere token de acceso válido.
-// @Tags         Authentication
-// @Accept       json
-// @Produce      json
-// @Security     BearerAuth
-// @Success      200  {object}  common.ApiResponse[responses.UserResponse]  "Perfil obtenido exitosamente"
-// @Failure      401  {object}  common.ApiResponse[responses.UserResponse]  "No autorizado"
-// @Failure      404  {object}  common.ApiResponse[responses.UserResponse]  "Usuario no encontrado"
-// @Failure      500  {object}  common.ApiResponse[responses.UserResponse]  "Error interno del servidor"
-// @Router       /api/v1/auth/me [get]
-func (c *AuthController) GetProfile(w http.ResponseWriter, r *http.Request) {
-	c.logger.Info("GET /api/v1/auth/me - Obteniendo perfil de usuario")
-
-	// Extraer user_id del contexto (inyectado por AuthMiddleware)
-	userID, ok := middlewares.GetUserIDFromContext(r.Context())
-	if !ok {
-		c.logger.Warn("User ID no encontrado en contexto")
-		c.respondJSON(w, common.UnauthorizedResponse[responses.UserResponse]("Usuario no autenticado"))
-		return
-	}
-
-	query := queries.GetProfileQuery{
-		UserID: userID,
-	}
-
-	response, err := mediator.Send[queries.GetProfileQuery, responses.UserResponse](
-		r.Context(),
-		c.mediator,
-		query,
-	)
-
-	if err != nil {
-		c.logger.Error("Error ejecutando GetProfileQuery",
-			zap.Error(err),
-			zap.String("user_id", userID),
-		)
-		c.respondJSON(w, common.InternalServerErrorResponse[responses.UserResponse](
-			"Error obteniendo perfil de usuario",
 		))
 		return
 	}
@@ -279,13 +233,17 @@ func (c *AuthController) Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Crear comando
+	// 3. Extraer access token del contexto (inyectado por AuthMiddleware)
+	accessToken, _ := middlewares.GetAccessTokenFromContext(r.Context())
+
+	// 4. Crear comando
 	command := commands.LogoutCommand{
 		UserID:       userID,
 		RefreshToken: req.RefreshToken,
+		AccessToken:  accessToken,
 	}
 
-	// 4. Enviar al mediator
+	// 5. Enviar al mediator
 	response, err := mediator.Send[commands.LogoutCommand, responses.EmptyResponse](
 		r.Context(),
 		c.mediator,
@@ -307,7 +265,7 @@ func (c *AuthController) Logout(w http.ResponseWriter, r *http.Request) {
 }
 
 // ========================================
-// RESPONSE HELPERS (MEJORADOS)
+// RESPONSE HELPERS
 // ========================================
 
 func (c *AuthController) respondJSON(w http.ResponseWriter, response interface{}) {

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/farmanexo/auth-service/internal/application/commands"
-	"github.com/farmanexo/auth-service/internal/application/queries"
 	"github.com/farmanexo/auth-service/pkg/mediator"
 	"go.uber.org/zap"
 )
@@ -55,11 +54,6 @@ func (p *LogAuditPostProcessor) Process(
 		p.logAudit("USER_LOGOUT", "", cmd.UserID, correlationID, isSuccess)
 	case *commands.LogoutCommand:
 		p.logAudit("USER_LOGOUT", "", cmd.UserID, correlationID, isSuccess)
-
-	case queries.GetProfileQuery:
-		p.logAudit("PROFILE_VIEWED", "", cmd.UserID, correlationID, isSuccess)
-	case *queries.GetProfileQuery:
-		p.logAudit("PROFILE_VIEWED", "", cmd.UserID, correlationID, isSuccess)
 
 	default:
 		p.logger.Debug("Post-processor: comando sin auditoría configurada")

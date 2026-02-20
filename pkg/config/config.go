@@ -15,6 +15,9 @@ type Config struct {
 	Server      ServerConfig   `mapstructure:"server"`
 	Database    DatabaseConfig `mapstructure:"database"`
 	JWT         JWTConfig      `mapstructure:"jwt"`
+	Redis       RedisConfig    `mapstructure:"redis"`
+	AWS         AWSConfig      `mapstructure:"aws"`
+	SQS         SQSConfig      `mapstructure:"sqs"`
 	Log         LogConfig      `mapstructure:"log"`
 }
 
@@ -46,6 +49,32 @@ type JWTConfig struct {
 	AccessTokenDuration  time.Duration `mapstructure:"access_token_duration"`
 	RefreshTokenDuration time.Duration `mapstructure:"refresh_token_duration"`
 	Issuer               string        `mapstructure:"issuer"`
+}
+
+// AWSConfig configuración de AWS
+type AWSConfig struct {
+	Region   string `mapstructure:"region"`
+	Endpoint string `mapstructure:"endpoint"` // Vacío para AWS real, URL de LocalStack para local
+}
+
+// SQSConfig configuración de SQS
+type SQSConfig struct {
+	AuthEventsQueueURL string `mapstructure:"auth_events_queue_url"`
+}
+
+// RedisConfig configuración de Redis
+type RedisConfig struct {
+	Host       string `mapstructure:"host"`
+	Port       int    `mapstructure:"port"`
+	Password   string `mapstructure:"password"`
+	DB         int    `mapstructure:"db"`
+	MaxRetries int    `mapstructure:"max_retries"`
+	PoolSize   int    `mapstructure:"pool_size"`
+}
+
+// GetAddr retorna la dirección host:port de Redis
+func (c *RedisConfig) GetAddr() string {
+	return fmt.Sprintf("%s:%d", c.Host, c.Port)
 }
 
 // LogConfig configuración de logging

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/farmanexo/auth-service/internal/domain/services"
 	"github.com/farmanexo/auth-service/internal/infrastructure/security"
 	"github.com/farmanexo/auth-service/internal/shared/common"
 	"github.com/farmanexo/auth-service/internal/shared/constants"
@@ -22,19 +23,23 @@ const (
 	UserIDCtxKey contextKey = "user_id"
 	// UserRoleCtxKey clave para el role en el contexto
 	UserRoleCtxKey contextKey = "user_role"
+	// AccessTokenCtxKey clave para el access token raw en el contexto
+	AccessTokenCtxKey contextKey = "access_token"
 )
 
 // AuthMiddleware maneja la autenticación JWT en rutas protegidas
 type AuthMiddleware struct {
-	jwtService security.JWTService
-	logger     *zap.Logger
+	jwtService     security.JWTService
+	tokenBlacklist services.TokenBlacklist
+	logger         *zap.Logger
 }
 
 // NewAuthMiddleware crea una nueva instancia del middleware de autenticación
-func NewAuthMiddleware(jwtService security.JWTService, logger *zap.Logger) *AuthMiddleware {
+func NewAuthMiddleware(jwtService security.JWTService, tokenBlacklist services.TokenBlacklist, logger *zap.Logger) *AuthMiddleware {
 	return &AuthMiddleware{
-		jwtService: jwtService,
-		logger:     logger,
+		jwtService:     jwtService,
+		tokenBlacklist: tokenBlacklist,
+		logger:         logger,
 	}
 }
 
@@ -69,7 +74,7 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 		}
 
 		// 3. Validar JWT
-		userID, role, err := m.jwtService.ValidateAccessToken(tokenString)
+		userID, role, jti, err := m.jwtService.ValidateAccessToken(tokenString)
 		if err != nil {
 			m.logger.Warn("Access token inválido",
 				zap.String("path", r.URL.Path),
@@ -79,20 +84,39 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
+		// 4. Verificar blacklist (fail-open: si Redis falla, permitimos el paso)
+		blacklisted, err := m.tokenBlacklist.IsBlacklisted(r.Context(), jti)
+		if err != nil {
+			m.logger.Warn("Error verificando blacklist, permitiendo acceso (fail-open)",
+				zap.String("jti", jti),
+				zap.String("user_id", userID),
+				zap.Error(err),
+			)
+		} else if blacklisted {
+			m.logger.Warn("Access token revocado (blacklisted)",
+				zap.String("jti", jti),
+				zap.String("user_id", userID),
+				zap.String("path", r.URL.Path),
+			)
+			m.respondUnauthorized(w, "Token revocado")
+			return
+		}
+
 		m.logger.Debug("Token validado exitosamente",
 			zap.String("user_id", userID),
 			zap.String("role", role),
 			zap.String("path", r.URL.Path),
 		)
 
-		// 4. Guardar user_id y role en el contexto
+		// 5. Guardar user_id, role y access_token en el contexto
 		ctx := context.WithValue(r.Context(), UserIDCtxKey, userID)
 		ctx = context.WithValue(ctx, UserRoleCtxKey, role)
+		ctx = context.WithValue(ctx, AccessTokenCtxKey, tokenString)
 
 		// También guardar en el mediator context para uso en handlers
 		ctx = mediator.WithValue(ctx, mediator.UserIDKey, userID)
 
-		// 5. Continuar con el siguiente handler
+		// 6. Continuar con el siguiente handler
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -118,4 +142,10 @@ func GetUserIDFromContext(ctx context.Context) (string, bool) {
 func GetUserRoleFromContext(ctx context.Context) (string, bool) {
 	role, ok := ctx.Value(UserRoleCtxKey).(string)
 	return role, ok
+}
+
+// GetAccessTokenFromContext obtiene el access token raw del contexto
+func GetAccessTokenFromContext(ctx context.Context) (string, bool) {
+	token, ok := ctx.Value(AccessTokenCtxKey).(string)
+	return token, ok
 }

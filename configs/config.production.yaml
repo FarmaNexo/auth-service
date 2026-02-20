@@ -25,6 +25,22 @@ jwt:
   refresh_token_duration: 72h # 3 días en producción
   issuer: "farmanexo-auth-service"
 
+redis:
+  host: ${REDIS_HOST}
+  port: ${REDIS_PORT}
+  password: ${REDIS_PASSWORD}
+  db: 0
+  max_retries: 3
+  pool_size: 50
+
+aws:
+  region: ${AWS_REGION}
+  endpoint: ""
+
+sqs:
+  auth_events_queue_url: ${SQS_AUTH_EVENTS_QUEUE_URL}
+
+
 log:
   level: info
   encoding: json # JSON estructurado para producción

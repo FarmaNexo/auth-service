@@ -203,6 +203,14 @@ func ValidationErrorResponse[T any](errors map[string]string) *ApiResponse[T] {
 	return resp
 }
 
+// TooManyRequestsResponse crea una respuesta 429 Too Many Requests
+func TooManyRequestsResponse[T any](message string) *ApiResponse[T] {
+	resp := NewApiResponse[T]()
+	resp.SetHttpStatus(constants.StatusTooManyRequests.Int())
+	resp.AddError(constants.CodeRateLimitExceeded, message)
+	return resp
+}
+
 // InternalServerErrorResponse crea una respuesta 500
 func InternalServerErrorResponse[T any](message string) *ApiResponse[T] {
 	resp := NewApiResponse[T]()

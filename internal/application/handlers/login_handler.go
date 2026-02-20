@@ -5,10 +5,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"math"
 	"time"
 
 	"github.com/farmanexo/auth-service/internal/application/commands"
+	"github.com/farmanexo/auth-service/internal/domain/events"
 	"github.com/farmanexo/auth-service/internal/domain/repositories"
+	"github.com/farmanexo/auth-service/internal/domain/services"
 	"github.com/farmanexo/auth-service/internal/infrastructure/security"
 	"github.com/farmanexo/auth-service/internal/presentation/dto/responses"
 	"github.com/farmanexo/auth-service/internal/shared/common"
@@ -20,10 +24,12 @@ import (
 
 // LoginHandler maneja el comando LoginCommand
 type LoginHandler struct {
-	userRepo   repositories.UserRepository
-	tokenRepo  repositories.TokenRepository
-	jwtService security.JWTService
-	logger     *zap.Logger
+	userRepo       repositories.UserRepository
+	tokenRepo      repositories.TokenRepository
+	jwtService     security.JWTService
+	eventPublisher services.EventPublisher
+	rateLimiter    services.RateLimiter
+	logger         *zap.Logger
 }
 
 // NewLoginHandler crea una nueva instancia del handler
@@ -31,13 +37,17 @@ func NewLoginHandler(
 	userRepo repositories.UserRepository,
 	tokenRepo repositories.TokenRepository,
 	jwtService security.JWTService,
+	eventPublisher services.EventPublisher,
+	rateLimiter services.RateLimiter,
 	logger *zap.Logger,
 ) *LoginHandler {
 	return &LoginHandler{
-		userRepo:   userRepo,
-		tokenRepo:  tokenRepo,
-		jwtService: jwtService,
-		logger:     logger,
+		userRepo:       userRepo,
+		tokenRepo:      tokenRepo,
+		jwtService:     jwtService,
+		eventPublisher: eventPublisher,
+		rateLimiter:    rateLimiter,
+		logger:         logger,
 	}
 }
 
@@ -51,6 +61,20 @@ func (h *LoginHandler) Handle(
 		zap.String("email", command.Email),
 		zap.String("request_name", command.GetName()),
 	)
+
+	// 0. Verificar rate limit por email
+	rateLimitKey := "ratelimit:login:" + command.Email
+	rateLimitResult, err := h.rateLimiter.Check(ctx, rateLimitKey, 5, 15*time.Minute)
+	if err != nil {
+		h.logger.Warn("Error verificando rate limit, permitiendo acceso (fail-open)",
+			zap.String("email", command.Email),
+			zap.Error(err),
+		)
+	} else if !rateLimitResult.Allowed {
+		minutesRemaining := int(math.Ceil(time.Until(rateLimitResult.ResetAt).Minutes()))
+		message := fmt.Sprintf("Demasiados intentos de login. Intente nuevamente en %d minuto(s)", minutesRemaining)
+		return h.tooManyRequestsResponse(message), nil
+	}
 
 	// 1. Buscar usuario por email
 	user, err := h.userRepo.FindByEmail(ctx, command.Email)
@@ -147,6 +171,9 @@ func (h *LoginHandler) Handle(
 		zap.Int("login_count", user.LoginCount),
 	)
 
+	// Publicar evento de login (fire-and-forget)
+	go h.publishEvent(context.Background(), events.NewUserLoginEvent(user.ID.String(), user.Email))
+
 	// 8. Construir respuesta SIMPLIFICADA (SIN datos de usuario)
 	expiresIn := int64(time.Until(accessExpiry).Seconds())
 
@@ -157,6 +184,17 @@ func (h *LoginHandler) Handle(
 	)
 
 	return common.OkResponse(*loginResponse), nil
+}
+
+// publishEvent publica un evento de autenticación (best-effort)
+func (h *LoginHandler) publishEvent(ctx context.Context, event events.AuthEvent) {
+	if err := h.eventPublisher.Publish(ctx, event); err != nil {
+		h.logger.Warn("Error publicando evento de autenticación",
+			zap.String("event_type", event.EventType),
+			zap.String("user_id", event.UserID),
+			zap.Error(err),
+		)
+	}
 }
 
 // verifyPassword verifica que el password coincida con el hash
@@ -171,6 +209,11 @@ func (h *LoginHandler) verifyPassword(hashedPassword string, plainPassword strin
 func (h *LoginHandler) hashToken(token string) string {
 	hash := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(hash[:])
+}
+
+// tooManyRequestsResponse crea una respuesta 429 Too Many Requests
+func (h *LoginHandler) tooManyRequestsResponse(message string) *common.ApiResponse[responses.LoginResponse] {
+	return common.TooManyRequestsResponse[responses.LoginResponse](message)
 }
 
 // unauthorizedResponse crea una respuesta 401 Unauthorized

@@ -25,6 +25,22 @@ jwt:
   refresh_token_duration: 120h
   issuer: "farmanexo-auth-service-uat"
 
+redis:
+  host: ${REDIS_HOST}
+  port: 6379
+  password: ${REDIS_PASSWORD}
+  db: 0
+  max_retries: 3
+  pool_size: 20
+
+aws:
+  region: ${AWS_REGION}
+  endpoint: ""
+
+sqs:
+  auth_events_queue_url: ${SQS_AUTH_EVENTS_QUEUE_URL}
+
+
 log:
   level: info
   encoding: json

@@ -7,7 +7,9 @@ import (
 
 	"github.com/farmanexo/auth-service/internal/application/commands"
 	"github.com/farmanexo/auth-service/internal/domain/entities"
+	"github.com/farmanexo/auth-service/internal/domain/events"
 	"github.com/farmanexo/auth-service/internal/domain/repositories"
+	"github.com/farmanexo/auth-service/internal/domain/services"
 	"github.com/farmanexo/auth-service/internal/presentation/dto/responses"
 	"github.com/farmanexo/auth-service/internal/shared/common"
 	"github.com/farmanexo/auth-service/internal/shared/constants"
@@ -18,17 +20,20 @@ import (
 
 // RegisterUserHandler maneja el comando RegisterUserCommand
 type RegisterUserHandler struct {
-	userRepo repositories.UserRepository
-	logger   *zap.Logger
+	userRepo       repositories.UserRepository
+	eventPublisher services.EventPublisher
+	logger         *zap.Logger
 }
 
 func NewRegisterUserHandler(
 	userRepo repositories.UserRepository,
+	eventPublisher services.EventPublisher,
 	logger *zap.Logger,
 ) *RegisterUserHandler {
 	return &RegisterUserHandler{
-		userRepo: userRepo,
-		logger:   logger,
+		userRepo:       userRepo,
+		eventPublisher: eventPublisher,
+		logger:         logger,
 	}
 }
 
@@ -97,16 +102,29 @@ func (h *RegisterUserHandler) Handle(
 		zap.String("email", user.Email),
 	)
 
+	// Publicar evento de registro (fire-and-forget)
+	go h.publishEvent(context.Background(), events.NewUserRegisteredEvent(user.ID.String(), user.Email))
+
 	// 5. Construir respuesta SIMPLIFICADA (sin tokens)
 	registerResponse := responses.NewRegisterResponse(
 		user.ID,
 		user.Email,
-		user.FullName,
 		user.CreatedAt,
 	)
 
 	// 6. Retornar respuesta exitosa
 	return common.CreatedResponse(*registerResponse), nil
+}
+
+// publishEvent publica un evento de autenticación (best-effort)
+func (h *RegisterUserHandler) publishEvent(ctx context.Context, event events.AuthEvent) {
+	if err := h.eventPublisher.Publish(ctx, event); err != nil {
+		h.logger.Warn("Error publicando evento de autenticación",
+			zap.String("event_type", event.EventType),
+			zap.String("user_id", event.UserID),
+			zap.Error(err),
+		)
+	}
 }
 
 func (h *RegisterUserHandler) hashPassword(password string) (string, error) {

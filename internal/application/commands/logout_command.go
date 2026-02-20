@@ -7,6 +7,7 @@ import "github.com/farmanexo/auth-service/internal/presentation/dto/responses"
 type LogoutCommand struct {
 	UserID       string // Del contexto (AuthMiddleware)
 	RefreshToken string // Del body
+	AccessToken  string // Del header Authorization (para blacklist)
 }
 
 // GetName retorna el nombre del comando

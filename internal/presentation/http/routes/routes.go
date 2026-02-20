@@ -13,7 +13,11 @@ import (
 )
 
 // SetupRoutes configura todas las rutas del servicio
-func SetupRoutes(authController *controllers.AuthController, authMiddleware *middlewares.AuthMiddleware) *chi.Mux {
+func SetupRoutes(
+	authController *controllers.AuthController,
+	authMiddleware *middlewares.AuthMiddleware,
+	rateLimitMiddleware *middlewares.RateLimitMiddleware,
+) *chi.Mux {
 	r := chi.NewRouter()
 
 	// ========================================
@@ -57,17 +61,16 @@ func SetupRoutes(authController *controllers.AuthController, authMiddleware *mid
 	// ========================================
 
 	r.Route("/api/v1", func(r chi.Router) {
-		// Auth routes (públicas)
 		r.Route("/auth", func(r chi.Router) {
+			// Rutas públicas
 			r.Post("/register", authController.Register)
 			r.Post("/login", authController.Login)
-			r.Post("/refresh", authController.RefreshToken)
+			r.With(rateLimitMiddleware.RefreshRateLimit).Post("/refresh", authController.RefreshToken)
 
 			// Rutas protegidas (requieren autenticación)
 			r.Group(func(r chi.Router) {
 				r.Use(authMiddleware.RequireAuth)
 
-				r.Get("/me", authController.GetProfile)
 				r.Post("/logout", authController.Logout)
 			})
 		})
@@ -78,7 +81,6 @@ func SetupRoutes(authController *controllers.AuthController, authMiddleware *mid
 	// ========================================
 
 	r.Route("/api/v2", func(r chi.Router) {
-		// Aquí irán las rutas de la versión 2
 		r.Get("/status", func(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte("API v2 - Próximamente"))
 		})

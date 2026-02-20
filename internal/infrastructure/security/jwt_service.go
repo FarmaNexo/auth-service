@@ -124,8 +124,8 @@ func (s *JWTServiceImpl) GenerateRefreshToken(userID string) (string, time.Time,
 	return tokenString, expiresAt, tokenID, nil
 }
 
-// ValidateAccessToken valida un access token y retorna userID y role
-func (s *JWTServiceImpl) ValidateAccessToken(tokenString string) (string, string, error) {
+// ValidateAccessToken valida un access token y retorna userID, role y jti
+func (s *JWTServiceImpl) ValidateAccessToken(tokenString string) (string, string, string, error) {
 	claims := &AccessTokenClaims{}
 
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
@@ -136,14 +136,36 @@ func (s *JWTServiceImpl) ValidateAccessToken(tokenString string) (string, string
 	})
 
 	if err != nil {
-		return "", "", fmt.Errorf("error parsing token: %w", err)
+		return "", "", "", fmt.Errorf("error parsing token: %w", err)
 	}
 
 	if !token.Valid {
-		return "", "", errors.New("invalid token")
+		return "", "", "", errors.New("invalid token")
 	}
 
-	return claims.UserID, claims.Role, nil
+	return claims.UserID, claims.Role, claims.ID, nil
+}
+
+// GetAccessTokenExpiration parsea un access token y retorna su fecha de expiración
+func (s *JWTServiceImpl) GetAccessTokenExpiration(tokenString string) (time.Time, error) {
+	claims := &AccessTokenClaims{}
+
+	_, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(s.secret), nil
+	})
+
+	if err != nil {
+		return time.Time{}, fmt.Errorf("error parsing token expiration: %w", err)
+	}
+
+	if claims.ExpiresAt == nil {
+		return time.Time{}, errors.New("token sin fecha de expiración")
+	}
+
+	return claims.ExpiresAt.Time, nil
 }
 
 // ValidateRefreshToken valida un refresh token

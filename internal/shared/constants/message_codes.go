@@ -37,6 +37,9 @@ const (
 	CodeEmailAlreadyTaken MessageCode = "BUS_002"
 	CodeResourceNotFound  MessageCode = "BUS_003"
 
+	// Rate limiting
+	CodeRateLimitExceeded MessageCode = "RATE_001"
+
 	// System errors
 	CodeInternalError      MessageCode = "SYS_001"
 	CodeDatabaseError      MessageCode = "SYS_002"
@@ -76,6 +79,9 @@ var MessageDescription = map[MessageCode]string{
 	CodeUserAlreadyExists: "El usuario ya existe",
 	CodeEmailAlreadyTaken: "El email ya está registrado",
 	CodeResourceNotFound:  "Recurso no encontrado",
+
+	// Rate limiting
+	CodeRateLimitExceeded: "Demasiadas solicitudes. Intente nuevamente más tarde",
 
 	// System
 	CodeInternalError:      "Error interno del servidor",
