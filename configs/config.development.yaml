@@ -16,7 +16,7 @@ database:
   user: ${DB_USER}
   password: ${DB_PASSWORD}
   dbname: auth_db_dev
-  sslmode: disable
+  sslmode: require
   max_open_conns: 25
   max_idle_conns: 10
   conn_max_lifetime: 5m

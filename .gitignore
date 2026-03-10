@@ -38,9 +38,6 @@ desktop.ini
 .env
 .env.*
 
-# Configuración local (cada desarrollador tiene la suya)
-configs/config.local.yaml
-
 # Logs
 *.log
 logs/
@@ -55,4 +52,3 @@ tmp/
 # AI Assistants
 CLAUDE.md
 .claude/
-INFRASTRUCTURE.md

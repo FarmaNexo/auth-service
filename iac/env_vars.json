@@ -1,0 +1,15 @@
+{
+  "environment_variables": [
+    { "name": "ENV", "value": "${environment}" },
+    { "name": "AWS_REGION", "value": "${aws_region}" },
+    { "name": "SQS_AUTH_EVENTS_QUEUE_URL", "value": "${sqs_auth_events_queue_url}" }
+  ],
+  "secrets": [
+    { "name": "DB_HOST", "valueFrom": "${aurora_cluster_endpoint_secret_arn}" },
+    { "name": "DB_USER", "valueFrom": "${db_auth_db_user_secret_arn}" },
+    { "name": "DB_PASSWORD", "valueFrom": "${db_auth_db_password_secret_arn}" },
+    { "name": "JWT_SECRET", "valueFrom": "${jwt_secret_arn}" },
+    { "name": "REDIS_HOST", "valueFrom": "${redis_endpoint_secret_arn}" },
+    { "name": "REDIS_PASSWORD", "valueFrom": "${redis_auth_token_secret_arn}" }
+  ]
+}
