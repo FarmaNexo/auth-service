@@ -411,3 +411,5 @@ auth-service/
     mediator/                           Mediator CQRS generico
   docs/                                 Swagger generado
 ```
+
+<!-- ci: trigger pipeline test -->
