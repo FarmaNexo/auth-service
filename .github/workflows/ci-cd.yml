@@ -114,11 +114,13 @@ jobs:
           docker build -t ${{ env.SERVICE_NAME }} .
 
           if [ "${{ github.ref }}" == "refs/heads/develop" ]; then
-            # Develop: tag with develop-{short sha}
+            # Develop: tag with develop-{short sha} + latest
             IMAGE_TAG="develop-${SHORT_SHA}"
             docker tag ${{ env.SERVICE_NAME }} ${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}
+            docker tag ${{ env.SERVICE_NAME }} ${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:latest
             docker push ${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}
-            echo "Pushed: ${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}"
+            docker push ${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:latest
+            echo "Pushed: ${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG} + latest"
 
           elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
             # Main: tag with latest + versioned tag (date-sha)
