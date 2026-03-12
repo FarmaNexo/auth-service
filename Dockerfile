@@ -17,8 +17,14 @@ COPY go.mod go.sum ./
 # Descargar dependencias
 RUN go mod download
 
+# Instalar swag CLI y generar Swagger docs
+RUN go install github.com/swaggo/swag/cmd/swag@latest
+
 # Copiar código fuente
 COPY . .
+
+# Generar Swagger docs
+RUN swag init -g cmd/server/main.go --output docs --parseDependency --parseInternal
 
 # Compilar binario
 # CGO_ENABLED=0 para binario estático
