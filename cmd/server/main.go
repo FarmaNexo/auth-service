@@ -104,7 +104,7 @@ func main() {
 	// ========================================
 	// REDIS
 	// ========================================
-	redisClient, err := cache.NewRedisClient(cfg.Redis, logger)
+	redisClient, err := cache.NewRedisClient(cfg.Redis, cfg.Environment, logger)
 	if err != nil {
 		logger.Fatal("Error conectando a Redis", zap.Error(err))
 	}
