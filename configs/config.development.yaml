@@ -11,10 +11,10 @@ server:
   idle_timeout: 60s
 
 database:
-  host: ${DB_HOST}
+  host: "${DB_HOST}"
   port: 5432
-  user: ${DB_USER}
-  password: ${DB_PASSWORD}
+  user: "${DB_USER}"
+  password: "${DB_PASSWORD}"
   dbname: auth_db
   sslmode: require
   max_open_conns: 25
@@ -22,25 +22,25 @@ database:
   conn_max_lifetime: 5m
 
 jwt:
-  secret: ${JWT_SECRET}
+  secret: "${JWT_SECRET}"
   access_token_duration: 1h
   refresh_token_duration: 168h # 7 días
   issuer: "farmanexo-auth-service-dev"
 
 redis:
-  host: ${REDIS_HOST}
+  host: "${REDIS_HOST}"
   port: 6379
-  password: ${REDIS_PASSWORD}
+  password: "${REDIS_PASSWORD}"
   db: 0
   max_retries: 3
   pool_size: 10
 
 aws:
-  region: ${AWS_REGION}
+  region: "${AWS_REGION}"
   endpoint: ""
 
 sqs:
-  auth_events_queue_url: ${SQS_AUTH_EVENTS_QUEUE_URL}
+  auth_events_queue_url: "${SQS_AUTH_EVENTS_QUEUE_URL}"
 
 
 log:
