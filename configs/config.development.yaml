@@ -15,7 +15,7 @@ database:
   port: 5432
   user: ${DB_USER}
   password: ${DB_PASSWORD}
-  dbname: auth_db_dev
+  dbname: auth_db
   sslmode: require
   max_open_conns: 25
   max_idle_conns: 10
