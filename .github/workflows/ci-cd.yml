@@ -136,12 +136,109 @@ jobs:
           echo "image-tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
 
   # ===========================================================================
-  # JOB 3: Deploy to Dev (only on develop)
+  # JOB 3: Run DB migrations on Dev (only on develop, BEFORE deploy)
+  # ===========================================================================
+  # Lanza una task efimera Fargate con la imagen recien pusheada y el comando
+  # override `migrate -path /app/migrations -database $DATABASE_URL up`.
+  # Si falla, deploy-dev no corre (depende de este job).
+  # ===========================================================================
+  migrate-dev:
+    name: Run Migrations (Dev)
+    runs-on: ubuntu-latest
+    needs: push-to-ecr
+    if: github.ref == 'refs/heads/develop'
+    permissions:
+      id-token: write
+      contents: read
+
+    env:
+      MIGRATE_TASK_DEF: farmanexo-dev-auth-service-migrate
+      LOG_GROUP: /ecs/farmanexo-dev-auth-service-migrate
+      # Subnets privadas app (us-east-1a + us-east-1b) — mismas que usa el ECS service
+      SUBNET_A: subnet-0f78a2d981ff02aa6
+      SUBNET_B: subnet-007607dbecbf15787
+
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_DEV_ACCOUNT_ID }}:role/github-actions-ecr-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve service security group
+        id: sg
+        run: |
+          SG_ID=$(aws ec2 describe-security-groups \
+            --filters "Name=tag:Name,Values=farmanexo-dev-${{ env.SERVICE_NAME }}-sg" \
+            --query 'SecurityGroups[0].GroupId' --output text \
+            --region ${{ env.AWS_REGION }})
+          if [ -z "${SG_ID}" ] || [ "${SG_ID}" == "None" ]; then
+            echo "::error::No se encontro el SG farmanexo-dev-${{ env.SERVICE_NAME }}-sg"
+            exit 1
+          fi
+          echo "sg-id=${SG_ID}" >> "$GITHUB_OUTPUT"
+          echo "Service SG: ${SG_ID}"
+
+      - name: Run migration task (Fargate)
+        id: run-task
+        run: |
+          TASK_ARN=$(aws ecs run-task \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --task-definition ${{ env.MIGRATE_TASK_DEF }} \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ env.SUBNET_A }},${{ env.SUBNET_B }}],securityGroups=[${{ steps.sg.outputs.sg-id }}],assignPublicIp=DISABLED}" \
+            --region ${{ env.AWS_REGION }} \
+            --query 'tasks[0].taskArn' --output text)
+          if [ -z "${TASK_ARN}" ] || [ "${TASK_ARN}" == "None" ]; then
+            echo "::error::run-task no devolvio un ARN. Revisa permisos OIDC y task def."
+            exit 1
+          fi
+          echo "task-arn=${TASK_ARN}" >> "$GITHUB_OUTPUT"
+          echo "Started migration task: ${TASK_ARN}"
+
+      - name: Wait for task to stop
+        run: |
+          aws ecs wait tasks-stopped \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --tasks ${{ steps.run-task.outputs.task-arn }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Dump logs + verify exit code
+        run: |
+          TASK_ARN="${{ steps.run-task.outputs.task-arn }}"
+
+          echo "=== Migration task logs ==="
+          aws logs tail "${LOG_GROUP}" --since 10m --region ${{ env.AWS_REGION }} || true
+          echo "=========================="
+
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --tasks "${TASK_ARN}" \
+            --region ${{ env.AWS_REGION }} \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+
+          REASON=$(aws ecs describe-tasks \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --tasks "${TASK_ARN}" \
+            --region ${{ env.AWS_REGION }} \
+            --query 'tasks[0].stoppedReason' --output text)
+
+          echo "Exit code: ${EXIT_CODE}"
+          echo "Stopped reason: ${REASON}"
+
+          if [ "${EXIT_CODE}" != "0" ]; then
+            echo "::error::Migrations failed (exit ${EXIT_CODE}): ${REASON}"
+            exit 1
+          fi
+          echo "Migrations applied successfully."
+
+  # ===========================================================================
+  # JOB 4: Deploy to Dev (only on develop, after migrations)
   # ===========================================================================
   deploy-dev:
     name: Deploy to Dev
     runs-on: ubuntu-latest
-    needs: push-to-ecr
+    needs: migrate-dev
     if: github.ref == 'refs/heads/develop'
     permissions:
       id-token: write
@@ -173,7 +270,7 @@ jobs:
           echo "Deployment complete."
 
   # ===========================================================================
-  # JOB 4: Deploy to Prod (only on main — placeholder)
+  # JOB 5: Deploy to Prod (only on main — placeholder)
   # ===========================================================================
   deploy-prod:
     name: Deploy to Prod

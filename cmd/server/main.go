@@ -13,7 +13,6 @@ import (
 	"github.com/farmanexo/auth-service/internal/application/commands"
 	"github.com/farmanexo/auth-service/internal/application/handlers"
 	"github.com/farmanexo/auth-service/internal/application/postprocessors"
-	"github.com/farmanexo/auth-service/internal/application/preprocessors"
 	"github.com/farmanexo/auth-service/internal/application/validators"
 	"github.com/farmanexo/auth-service/internal/infrastructure/cache"
 	"github.com/farmanexo/auth-service/internal/infrastructure/messaging"
@@ -178,18 +177,18 @@ func main() {
 	mediator.RegisterValidator[commands.LoginCommand, responses.LoginResponse](med, loginValidator)
 
 	// ========================================
-	// PREPROCESSORS Y POSTPROCESSORS
+	// POSTPROCESSORS
 	// ========================================
-	sanitizePreProcessor := preprocessors.NewSanitizeInputPreProcessor(logger)
-	med.RegisterPreProcessor(sanitizePreProcessor)
-
+	// Nota: la sanitización se hace en el boundary (controllers, vía DTO.Sanitize()),
+	// no como preprocessor del mediator. Razón: el mediator pasa el command por valor,
+	// así que un preprocessor nunca puede mutar el original.
 	auditPostProcessor := postprocessors.NewLogAuditPostProcessor(logger)
 	med.RegisterPostProcessor(auditPostProcessor)
 
 	logger.Info("Mediator configurado",
 		zap.Int("handlers", 4),
 		zap.Int("validators", 2),
-		zap.Int("preprocessors", 1),
+		zap.Int("preprocessors", 0),
 		zap.Int("postprocessors", 1),
 	)
 

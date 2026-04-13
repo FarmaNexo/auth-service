@@ -103,7 +103,13 @@ func (h *RegisterUserHandler) Handle(
 	)
 
 	// Publicar evento de registro (fire-and-forget)
-	go h.publishEvent(context.Background(), events.NewUserRegisteredEvent(user.ID.String(), user.Email))
+	go h.publishEvent(context.Background(), events.NewUserRegisteredEvent(
+		user.ID.String(),
+		user.Email,
+		user.FullName,
+		user.Phone,
+		user.Role,
+	))
 
 	// 5. Construir respuesta SIMPLIFICADA (sin tokens)
 	registerResponse := responses.NewRegisterResponse(

@@ -56,6 +56,8 @@ func (c *AuthController) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req.Sanitize()
+
 	command := commands.RegisterUserCommand{
 		Email:    req.Email,
 		Password: req.Password,
@@ -108,6 +110,8 @@ func (c *AuthController) Login(w http.ResponseWriter, r *http.Request) {
 		))
 		return
 	}
+
+	req.Sanitize()
 
 	command := commands.LoginCommand{
 		Email:    req.Email,
