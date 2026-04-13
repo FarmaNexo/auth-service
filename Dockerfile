@@ -58,9 +58,11 @@ COPY --from=builder /app/bin/auth-service /app/auth-service
 # Copiar configs
 COPY --from=builder /app/configs /app/configs
 
-# Migrations: binario migrate + SQL files (para task efimero de CI)
+# Migrations: binario migrate + SQL files + runner con URL-encode (para task efimero de CI)
 COPY --from=builder /go/bin/migrate /usr/local/bin/migrate
 COPY --from=builder /app/migrations /app/migrations
+COPY --from=builder /app/scripts/migrate-runner.sh /usr/local/bin/migrate-runner
+RUN chmod +x /usr/local/bin/migrate-runner
 
 # Cambiar ownership a appuser
 RUN chown -R appuser:appgroup /app
