@@ -3,7 +3,9 @@ package controllers
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
+	"strings"
 
 	"github.com/farmanexo/auth-service/internal/application/commands"
 	"github.com/farmanexo/auth-service/internal/presentation/dto/requests"
@@ -59,10 +61,15 @@ func (c *AuthController) Register(w http.ResponseWriter, r *http.Request) {
 	req.Sanitize()
 
 	command := commands.RegisterUserCommand{
-		Email:    req.Email,
-		Password: req.Password,
-		FullName: req.FullName,
-		Phone:    req.Phone,
+		Email:           req.Email,
+		Password:        req.Password,
+		FullName:        req.FullName,
+		Phone:           req.Phone,
+		AcceptedTerms:   req.AcceptedTerms,
+		AcceptedPrivacy: req.AcceptedPrivacy,
+		MarketingOptIn:  req.MarketingOptIn,
+		IPAddress:       extractClientIP(r),
+		UserAgent:       r.UserAgent(),
 	}
 
 	response, err := mediator.Send[commands.RegisterUserCommand, responses.RegisterResponse](
@@ -266,6 +273,156 @@ func (c *AuthController) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c.respondJSON(w, response)
+}
+
+// GetMyConsents godoc
+// @Summary      Listar mis consentimientos
+// @Description  Devuelve el historial de consentimientos (terms, privacy, marketing) del usuario autenticado. Parte del derecho ARCO de acceso (LPDP Ley 29733).
+// @Tags         Privacy
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200  {object}  common.ApiResponse[responses.ConsentsListResponse]  "Historial de consentimientos"
+// @Failure      401  {object}  common.ApiResponse[responses.ConsentsListResponse]  "No autorizado"
+// @Failure      500  {object}  common.ApiResponse[responses.ConsentsListResponse]  "Error interno"
+// @Router       /api/v1/auth/me/consents [get]
+func (c *AuthController) GetMyConsents(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middlewares.GetUserIDFromContext(r.Context())
+	if !ok {
+		c.respondJSON(w, common.UnauthorizedResponse[responses.ConsentsListResponse]("Usuario no autenticado"))
+		return
+	}
+
+	command := commands.GetMyConsentsCommand{UserID: userID}
+	response, err := mediator.Send[commands.GetMyConsentsCommand, responses.ConsentsListResponse](
+		r.Context(), c.mediator, command,
+	)
+	if err != nil {
+		c.logger.Error("Error listando consentimientos", zap.Error(err), zap.String("user_id", userID))
+		c.respondJSON(w, common.InternalServerErrorResponse[responses.ConsentsListResponse]("Error consultando consentimientos"))
+		return
+	}
+	c.respondJSON(w, response)
+}
+
+// DeleteMyAccount godoc
+// @Summary      Eliminar mi cuenta (ARCO)
+// @Description  Ejercicio del derecho ARCO de cancelación (LPDP Ley 29733). Anonimiza PII y soft-deletea la cuenta. Publica USER_DELETED para que otros servicios limpien sus proyecciones. Irreversible.
+// @Tags         Privacy
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200  {object}  common.ApiResponse[responses.EmptyResponse]  "Cuenta eliminada"
+// @Failure      401  {object}  common.ApiResponse[responses.EmptyResponse]  "No autorizado"
+// @Failure      404  {object}  common.ApiResponse[responses.EmptyResponse]  "Usuario no encontrado"
+// @Failure      500  {object}  common.ApiResponse[responses.EmptyResponse]  "Error interno"
+// @Router       /api/v1/auth/me [delete]
+func (c *AuthController) DeleteMyAccount(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middlewares.GetUserIDFromContext(r.Context())
+	if !ok {
+		c.respondJSON(w, common.UnauthorizedResponse[responses.EmptyResponse]("Usuario no autenticado"))
+		return
+	}
+
+	command := commands.DeleteAccountCommand{UserID: userID}
+	response, err := mediator.Send[commands.DeleteAccountCommand, responses.EmptyResponse](
+		r.Context(), c.mediator, command,
+	)
+	if err != nil {
+		c.logger.Error("Error eliminando cuenta (ARCO)", zap.Error(err), zap.String("user_id", userID))
+		c.respondJSON(w, common.InternalServerErrorResponse[responses.EmptyResponse]("Error eliminando la cuenta"))
+		return
+	}
+	c.respondJSON(w, response)
+}
+
+// GetConsentsStatus godoc
+// @Summary      Estado de consentimientos (versionado)
+// @Description  Indica si el usuario tiene al día los consentimientos vigentes. Si `up_to_date=false`, devuelve en `pending` los tipos que requieren re-aceptación (HU-011).
+// @Tags         Privacy
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200  {object}  common.ApiResponse[responses.ConsentsStatusResponse]  "Estado"
+// @Failure      401  {object}  common.ApiResponse[responses.ConsentsStatusResponse]  "No autorizado"
+// @Router       /api/v1/auth/me/consents/status [get]
+func (c *AuthController) GetConsentsStatus(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middlewares.GetUserIDFromContext(r.Context())
+	if !ok {
+		c.respondJSON(w, common.UnauthorizedResponse[responses.ConsentsStatusResponse]("Usuario no autenticado"))
+		return
+	}
+
+	command := commands.GetConsentsStatusCommand{UserID: userID}
+	response, err := mediator.Send[commands.GetConsentsStatusCommand, responses.ConsentsStatusResponse](
+		r.Context(), c.mediator, command,
+	)
+	if err != nil {
+		c.logger.Error("Error consultando estado de consentimientos", zap.Error(err), zap.String("user_id", userID))
+		c.respondJSON(w, common.InternalServerErrorResponse[responses.ConsentsStatusResponse]("Error consultando estado"))
+		return
+	}
+	c.respondJSON(w, response)
+}
+
+// AcceptConsents godoc
+// @Summary      Re-aceptar consentimientos pendientes
+// @Description  Registra aceptación explícita de los consentimientos indicados con la versión vigente. Usado tras bump de TyC o Política de Privacidad.
+// @Tags         Privacy
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        request  body      requests.AcceptConsentsRequest  true  "Tipos a aceptar"
+// @Success      200      {object}  common.ApiResponse[responses.EmptyResponse]  "Aceptado"
+// @Failure      400      {object}  common.ApiResponse[responses.EmptyResponse]  "Validación"
+// @Failure      401      {object}  common.ApiResponse[responses.EmptyResponse]  "No autorizado"
+// @Router       /api/v1/auth/me/consents/accept [post]
+func (c *AuthController) AcceptConsents(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middlewares.GetUserIDFromContext(r.Context())
+	if !ok {
+		c.respondJSON(w, common.UnauthorizedResponse[responses.EmptyResponse]("Usuario no autenticado"))
+		return
+	}
+
+	var req requests.AcceptConsentsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.respondJSON(w, common.BadRequestResponse[responses.EmptyResponse](
+			constants.CodeValidationError, "Invalid request body",
+		))
+		return
+	}
+
+	command := commands.AcceptConsentsCommand{
+		UserID:       userID,
+		ConsentTypes: req.ConsentTypes,
+		IPAddress:    extractClientIP(r),
+		UserAgent:    r.UserAgent(),
+	}
+	response, err := mediator.Send[commands.AcceptConsentsCommand, responses.EmptyResponse](
+		r.Context(), c.mediator, command,
+	)
+	if err != nil {
+		c.logger.Error("Error aceptando consentimientos", zap.Error(err), zap.String("user_id", userID))
+		c.respondJSON(w, common.InternalServerErrorResponse[responses.EmptyResponse]("Error registrando consentimientos"))
+		return
+	}
+	c.respondJSON(w, response)
+}
+
+// extractClientIP obtiene la IP real del cliente respetando X-Forwarded-For (via ALB/API Gateway).
+// Retorna string vacío si no se puede determinar; la BD acepta NULL en ese caso.
+func extractClientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		if ip := strings.TrimSpace(parts[0]); ip != "" {
+			return ip
+		}
+	}
+	if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
+		return strings.TrimSpace(realIP)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 // ========================================

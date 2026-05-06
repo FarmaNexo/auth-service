@@ -59,6 +59,14 @@ func (v *RegisterUserValidator) Validate(
 		}
 	}
 
+	// 5. Consentimientos obligatorios (LPDP Ley 29733)
+	if !command.AcceptedTerms {
+		errors = append(errors, "debes aceptar los términos de uso para crear una cuenta")
+	}
+	if !command.AcceptedPrivacy {
+		errors = append(errors, "debes aceptar la política de privacidad para crear una cuenta")
+	}
+
 	// Si hay errores, retornarlos
 	if len(errors) > 0 {
 		return fmt.Errorf("errores de validación: %s", strings.Join(errors, "; "))

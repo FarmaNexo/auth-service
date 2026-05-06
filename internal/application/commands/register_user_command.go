@@ -11,6 +11,15 @@ type RegisterUserCommand struct {
 	Password string
 	FullName string
 	Phone    string
+
+	// Consentimientos LPDP (aceptación explícita del usuario en el registro)
+	AcceptedTerms   bool
+	AcceptedPrivacy bool
+	MarketingOptIn  bool
+
+	// Evidencia legal (capturada en el controller desde la request HTTP)
+	IPAddress string
+	UserAgent string
 }
 
 func (c RegisterUserCommand) GetName() string {
@@ -30,6 +39,12 @@ func (c RegisterUserCommand) Validate() error {
 	if c.FullName == "" {
 		return ErrFullNameRequired
 	}
+	if !c.AcceptedTerms {
+		return ErrTermsNotAccepted
+	}
+	if !c.AcceptedPrivacy {
+		return ErrPrivacyNotAccepted
+	}
 	return nil
 }
 
@@ -38,10 +53,12 @@ func (c RegisterUserCommand) Validate() error {
 // ========================================
 
 var (
-	ErrEmailRequired    = NewValidationError("email", "Email es requerido")
-	ErrPasswordRequired = NewValidationError("password", "Password es requerido")
-	ErrPasswordTooShort = NewValidationError("password", "Password debe tener al menos 8 caracteres")
-	ErrFullNameRequired = NewValidationError("full_name", "Nombre completo es requerido")
+	ErrEmailRequired      = NewValidationError("email", "Email es requerido")
+	ErrPasswordRequired   = NewValidationError("password", "Password es requerido")
+	ErrPasswordTooShort   = NewValidationError("password", "Password debe tener al menos 8 caracteres")
+	ErrFullNameRequired   = NewValidationError("full_name", "Nombre completo es requerido")
+	ErrTermsNotAccepted   = NewValidationError("accepted_terms", "Debes aceptar los términos de uso para crear una cuenta")
+	ErrPrivacyNotAccepted = NewValidationError("accepted_privacy", "Debes aceptar la política de privacidad para crear una cuenta")
 )
 
 type ValidationError struct {

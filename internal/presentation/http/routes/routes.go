@@ -15,6 +15,7 @@ import (
 // SetupRoutes configura todas las rutas del servicio
 func SetupRoutes(
 	authController *controllers.AuthController,
+	legalController *controllers.LegalController,
 	authMiddleware *middlewares.AuthMiddleware,
 	rateLimitMiddleware *middlewares.RateLimitMiddleware,
 ) *chi.Mux {
@@ -55,6 +56,7 @@ func SetupRoutes(
 
 	r.Get("/health", authController.HealthCheck)
 	r.Get("/auth/health", authController.HealthCheck)
+	r.Get("/legal/health", authController.HealthCheck)
 	r.Get("/", authController.HealthCheck)
 
 	// ========================================
@@ -62,6 +64,17 @@ func SetupRoutes(
 	// ========================================
 
 	r.Route("/api/v1", func(r chi.Router) {
+		// ========================================
+		// LEGAL DOCUMENTS — público (sin JWT)
+		// Términos, Privacidad, etc. accesibles incluso sin login
+		// ========================================
+		r.Route("/legal", func(r chi.Router) {
+			r.Get("/types", legalController.ListTypes)
+			r.Get("/{type_code}", legalController.GetCurrent)
+			r.Get("/{type_code}/versions", legalController.ListVersions)
+			r.Get("/{type_code}/versions/{version}", legalController.GetByVersion)
+		})
+
 		r.Route("/auth", func(r chi.Router) {
 			// Rutas públicas
 			r.Post("/register", authController.Register)
@@ -73,6 +86,12 @@ func SetupRoutes(
 				r.Use(authMiddleware.RequireAuth)
 
 				r.Post("/logout", authController.Logout)
+
+				// Derechos ARCO (LPDP Ley 29733)
+				r.Get("/me/consents", authController.GetMyConsents)
+				r.Get("/me/consents/status", authController.GetConsentsStatus)
+				r.Post("/me/consents/accept", authController.AcceptConsents)
+				r.Delete("/me", authController.DeleteMyAccount)
 			})
 		})
 	})

@@ -88,6 +88,9 @@ func main() {
 	// ========================================
 	userRepo := postgres.NewUserRepository(db, logger)
 	tokenRepo := postgres.NewTokenRepository(db, logger)
+	consentRepo := postgres.NewConsentRepository(db, logger)
+	legalDocRepo := postgres.NewLegalDocumentRepository(db, logger)
+	legalTypeRepo := postgres.NewLegalDocumentTypeRepository(db, logger)
 
 	// ========================================
 	// SERVICIOS
@@ -131,6 +134,8 @@ func main() {
 	// Register Handler
 	registerUserHandler := handlers.NewRegisterUserHandler(
 		userRepo,
+		consentRepo,
+		legalDocRepo,
 		eventPublisher,
 		logger,
 	)
@@ -165,6 +170,53 @@ func main() {
 		logger,
 	)
 	mediator.RegisterHandler(med, logoutHandler)
+
+	// Get My Consents Handler (ARCO - acceso)
+	getMyConsentsHandler := handlers.NewGetMyConsentsHandler(
+		consentRepo,
+		logger,
+	)
+	mediator.RegisterHandler(med, getMyConsentsHandler)
+
+	// Delete Account Handler (ARCO - cancelación)
+	deleteAccountHandler := handlers.NewDeleteAccountHandler(
+		userRepo,
+		tokenRepo,
+		eventPublisher,
+		logger,
+	)
+	mediator.RegisterHandler(med, deleteAccountHandler)
+
+	// Consents Status Handler (HU-011 - versionado, lee versión vigente desde DB)
+	consentsStatusHandler := handlers.NewGetConsentsStatusHandler(
+		consentRepo,
+		legalDocRepo,
+		logger,
+	)
+	mediator.RegisterHandler(med, consentsStatusHandler)
+
+	// Accept Consents Handler (HU-011 - re-aceptación, lee versión vigente desde DB)
+	acceptConsentsHandler := handlers.NewAcceptConsentsHandler(
+		consentRepo,
+		legalDocRepo,
+		logger,
+	)
+	mediator.RegisterHandler(med, acceptConsentsHandler)
+
+	// ========================================
+	// LEGAL DOCUMENTS — Query handlers (públicos)
+	// ========================================
+	getLegalTypesHandler := handlers.NewGetLegalDocumentTypesHandler(legalTypeRepo, logger)
+	mediator.RegisterHandler(med, getLegalTypesHandler)
+
+	getCurrentLegalHandler := handlers.NewGetCurrentLegalDocumentHandler(legalDocRepo, logger)
+	mediator.RegisterHandler(med, getCurrentLegalHandler)
+
+	getLegalByVersionHandler := handlers.NewGetLegalDocumentByVersionHandler(legalDocRepo, logger)
+	mediator.RegisterHandler(med, getLegalByVersionHandler)
+
+	listLegalVersionsHandler := handlers.NewListLegalDocumentVersionsHandler(legalDocRepo, logger)
+	mediator.RegisterHandler(med, listLegalVersionsHandler)
 
 	// ========================================
 	// VALIDATORS
@@ -202,7 +254,8 @@ func main() {
 	// CONTROLADORES Y RUTAS
 	// ========================================
 	authController := controllers.NewAuthController(med, logger)
-	router := routes.SetupRoutes(authController, authMiddleware, rateLimitMiddleware)
+	legalController := controllers.NewLegalController(med, logger)
+	router := routes.SetupRoutes(authController, legalController, authMiddleware, rateLimitMiddleware)
 
 	// ========================================
 	// SERVIDOR HTTP

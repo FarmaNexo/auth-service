@@ -18,20 +18,28 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+const defaultConsentLocale = "es-PE"
+
 // RegisterUserHandler maneja el comando RegisterUserCommand
 type RegisterUserHandler struct {
 	userRepo       repositories.UserRepository
+	consentRepo    repositories.ConsentRepository
+	legalDocRepo   repositories.LegalDocumentRepository
 	eventPublisher services.EventPublisher
 	logger         *zap.Logger
 }
 
 func NewRegisterUserHandler(
 	userRepo repositories.UserRepository,
+	consentRepo repositories.ConsentRepository,
+	legalDocRepo repositories.LegalDocumentRepository,
 	eventPublisher services.EventPublisher,
 	logger *zap.Logger,
 ) *RegisterUserHandler {
 	return &RegisterUserHandler{
 		userRepo:       userRepo,
+		consentRepo:    consentRepo,
+		legalDocRepo:   legalDocRepo,
 		eventPublisher: eventPublisher,
 		logger:         logger,
 	}
@@ -69,7 +77,37 @@ func (h *RegisterUserHandler) Handle(
 		), nil
 	}
 
-	// 2. Hash del password
+	// 2. Cargar versiones vigentes de los documentos legales DESDE LA BASE DE DATOS
+	//    (DB es la única fuente de verdad — el YAML ya no se usa para esto).
+	termsDoc, err := h.legalDocRepo.FindCurrentPublished(ctx, entities.LegalDocCodeTerms, defaultConsentLocale)
+	if err != nil || termsDoc == nil {
+		h.logger.Error("Error cargando Términos vigentes",
+			zap.Error(err),
+		)
+		return common.InternalServerErrorResponse[responses.RegisterResponse](
+			"Error cargando documentos legales vigentes",
+		), nil
+	}
+	privacyDoc, err := h.legalDocRepo.FindCurrentPublished(ctx, entities.LegalDocCodePrivacy, defaultConsentLocale)
+	if err != nil || privacyDoc == nil {
+		h.logger.Error("Error cargando Política de Privacidad vigente",
+			zap.Error(err),
+		)
+		return common.InternalServerErrorResponse[responses.RegisterResponse](
+			"Error cargando documentos legales vigentes",
+		), nil
+	}
+	marketingDoc, err := h.legalDocRepo.FindCurrentPublished(ctx, entities.LegalDocCodeMarketing, defaultConsentLocale)
+	if err != nil || marketingDoc == nil {
+		h.logger.Error("Error cargando documento de Marketing vigente",
+			zap.Error(err),
+		)
+		return common.InternalServerErrorResponse[responses.RegisterResponse](
+			"Error cargando documentos legales vigentes",
+		), nil
+	}
+
+	// 3. Hash del password
 	passwordHash, err := h.hashPassword(command.Password)
 	if err != nil {
 		h.logger.Error("Error hasheando password", zap.Error(err))
@@ -78,7 +116,7 @@ func (h *RegisterUserHandler) Handle(
 		), nil
 	}
 
-	// 3. Crear entidad User
+	// 4. Crear entidad User
 	user := entities.NewUserWithPhone(
 		command.Email,
 		passwordHash,
@@ -86,7 +124,7 @@ func (h *RegisterUserHandler) Handle(
 		command.Phone,
 	)
 
-	// 4. Guardar en base de datos
+	// 5. Guardar usuario
 	if err := h.userRepo.Create(ctx, user); err != nil {
 		h.logger.Error("Error creando usuario en BD",
 			zap.Error(err),
@@ -102,6 +140,35 @@ func (h *RegisterUserHandler) Handle(
 		zap.String("email", user.Email),
 	)
 
+	// 6. Persistir consentimientos LPDP ligados al document_id exacto + hash de integridad.
+	//    La validación ya garantizó que AcceptedTerms == true y AcceptedPrivacy == true.
+	consents := []*entities.UserConsent{
+		entities.NewUserConsentWithDocument(
+			user.ID, entities.ConsentTypeTermsOfService, termsDoc.Version,
+			termsDoc.ID, termsDoc.ContentHash, true,
+			command.IPAddress, command.UserAgent,
+		),
+		entities.NewUserConsentWithDocument(
+			user.ID, entities.ConsentTypePrivacyPolicy, privacyDoc.Version,
+			privacyDoc.ID, privacyDoc.ContentHash, true,
+			command.IPAddress, command.UserAgent,
+		),
+		entities.NewUserConsentWithDocument(
+			user.ID, entities.ConsentTypeMarketingCommunications, marketingDoc.Version,
+			marketingDoc.ID, marketingDoc.ContentHash, command.MarketingOptIn,
+			command.IPAddress, command.UserAgent,
+		),
+	}
+	if err := h.consentRepo.CreateBatch(ctx, consents); err != nil {
+		h.logger.Error("Error persistiendo consentimientos (usuario quedó creado)",
+			zap.Error(err),
+			zap.String("user_id", user.ID.String()),
+		)
+		return common.InternalServerErrorResponse[responses.RegisterResponse](
+			"Error registrando los consentimientos legales",
+		), nil
+	}
+
 	// Publicar evento de registro (fire-and-forget)
 	go h.publishEvent(context.Background(), events.NewUserRegisteredEvent(
 		user.ID.String(),
@@ -111,14 +178,12 @@ func (h *RegisterUserHandler) Handle(
 		user.Role,
 	))
 
-	// 5. Construir respuesta SIMPLIFICADA (sin tokens)
 	registerResponse := responses.NewRegisterResponse(
 		user.ID,
 		user.Email,
 		user.CreatedAt,
 	)
 
-	// 6. Retornar respuesta exitosa
 	return common.CreatedResponse(*registerResponse), nil
 }
 

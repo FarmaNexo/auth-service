@@ -10,6 +10,7 @@ const (
 	EventUserLogout       = "USER_LOGOUT"
 	EventUserEmailChanged = "USER_EMAIL_CHANGED"
 	EventUserRoleChanged  = "USER_ROLE_CHANGED"
+	EventUserDeleted      = "USER_DELETED"
 )
 
 // AuthEvent representa un evento de autenticación.
@@ -74,6 +75,16 @@ func NewUserLoginEvent(userID string, email string) AuthEvent {
 func NewUserLogoutEvent(userID string) AuthEvent {
 	return AuthEvent{
 		EventType: EventUserLogout,
+		UserID:    userID,
+		Timestamp: time.Now(),
+	}
+}
+
+// NewUserDeletedEvent crea un evento cuando el usuario ejerce su derecho ARCO de cancelación.
+// Los consumidores (user-service, etc.) deben anonimizar o eliminar sus proyecciones locales.
+func NewUserDeletedEvent(userID string) AuthEvent {
+	return AuthEvent{
+		EventType: EventUserDeleted,
 		UserID:    userID,
 		Timestamp: time.Now(),
 	}
