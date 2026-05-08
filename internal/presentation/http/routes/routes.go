@@ -56,26 +56,29 @@ func SetupRoutes(
 
 	r.Get("/health", authController.HealthCheck)
 	r.Get("/auth/health", authController.HealthCheck)
-	r.Get("/legal/health", authController.HealthCheck)
 	r.Get("/", authController.HealthCheck)
 
 	// ========================================
 	// API ROUTES - VERSION 1
 	// ========================================
-
+	//
+	// Principio (services/CLAUDE.md §5.5): los recursos viven bajo prefijos
+	// plurales por dominio. /legal NO es un dominio top-level — es un
+	// sub-recurso de /auth (los términos legales son cosa de la cuenta y
+	// del consentimiento, gestionado por auth-service). Por eso vive en
+	// /api/v1/auth/legal/*, no en /api/v1/legal/*.
 	r.Route("/api/v1", func(r chi.Router) {
-		// ========================================
-		// LEGAL DOCUMENTS — público (sin JWT)
-		// Términos, Privacidad, etc. accesibles incluso sin login
-		// ========================================
-		r.Route("/legal", func(r chi.Router) {
-			r.Get("/types", legalController.ListTypes)
-			r.Get("/{type_code}", legalController.GetCurrent)
-			r.Get("/{type_code}/versions", legalController.ListVersions)
-			r.Get("/{type_code}/versions/{version}", legalController.GetByVersion)
-		})
-
 		r.Route("/auth", func(r chi.Router) {
+			// LEGAL DOCUMENTS — público (sin JWT).
+			// Términos, Privacidad, etc. accesibles incluso sin login porque
+			// la página /terminos debe verse antes de registrarse.
+			r.Route("/legal", func(r chi.Router) {
+				r.Get("/types", legalController.ListTypes)
+				r.Get("/{type_code}", legalController.GetCurrent)
+				r.Get("/{type_code}/versions", legalController.ListVersions)
+				r.Get("/{type_code}/versions/{version}", legalController.GetByVersion)
+			})
+
 			// Rutas públicas
 			r.Post("/register", authController.Register)
 			r.Post("/login", authController.Login)

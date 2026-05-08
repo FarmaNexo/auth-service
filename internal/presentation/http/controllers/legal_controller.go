@@ -32,7 +32,7 @@ func NewLegalController(med *mediator.Mediator, logger *zap.Logger) *LegalContro
 // @Produce      json
 // @Success      200  {object}  common.ApiResponse[responses.LegalDocumentTypesResponse]
 // @Failure      500  {object}  common.ApiResponse[responses.LegalDocumentTypesResponse]
-// @Router       /api/v1/legal/types [get]
+// @Router       /api/v1/auth/legal/types [get]
 func (c *LegalController) ListTypes(w http.ResponseWriter, r *http.Request) {
 	cmd := commands.GetLegalDocumentTypesCommand{}
 	resp, err := mediator.Send[commands.GetLegalDocumentTypesCommand, responses.LegalDocumentTypesResponse](
@@ -57,7 +57,7 @@ func (c *LegalController) ListTypes(w http.ResponseWriter, r *http.Request) {
 // @Param        locale     query string  false "Locale (default: es-PE)"
 // @Success      200  {object}  common.ApiResponse[responses.LegalDocumentResponse]
 // @Failure      404  {object}  common.ApiResponse[responses.LegalDocumentResponse]
-// @Router       /api/v1/legal/{type_code} [get]
+// @Router       /api/v1/auth/legal/{type_code} [get]
 func (c *LegalController) GetCurrent(w http.ResponseWriter, r *http.Request) {
 	typeCode := chi.URLParam(r, "type_code")
 	locale := r.URL.Query().Get("locale")
@@ -87,7 +87,7 @@ func (c *LegalController) GetCurrent(w http.ResponseWriter, r *http.Request) {
 // @Param        locale     query string  false "Locale (default: es-PE)"
 // @Success      200  {object}  common.ApiResponse[responses.LegalDocumentResponse]
 // @Failure      404  {object}  common.ApiResponse[responses.LegalDocumentResponse]
-// @Router       /api/v1/legal/{type_code}/versions/{version} [get]
+// @Router       /api/v1/auth/legal/{type_code}/versions/{version} [get]
 func (c *LegalController) GetByVersion(w http.ResponseWriter, r *http.Request) {
 	typeCode := chi.URLParam(r, "type_code")
 	version := chi.URLParam(r, "version")
@@ -120,7 +120,7 @@ func (c *LegalController) GetByVersion(w http.ResponseWriter, r *http.Request) {
 // @Param        type_code  path  string  true  "Código del tipo"
 // @Param        locale     query string  false "Locale (default: es-PE)"
 // @Success      200  {object}  common.ApiResponse[responses.LegalDocumentVersionsResponse]
-// @Router       /api/v1/legal/{type_code}/versions [get]
+// @Router       /api/v1/auth/legal/{type_code}/versions [get]
 func (c *LegalController) ListVersions(w http.ResponseWriter, r *http.Request) {
 	typeCode := chi.URLParam(r, "type_code")
 	locale := r.URL.Query().Get("locale")
