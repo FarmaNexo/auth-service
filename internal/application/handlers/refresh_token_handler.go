@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"time"
 
 	"github.com/farmanexo/auth-service/internal/application/commands"
@@ -20,6 +21,7 @@ import (
 
 // RefreshTokenHandler maneja el comando RefreshTokenCommand
 type RefreshTokenHandler struct {
+	txManager  repositories.TransactionManager
 	userRepo   repositories.UserRepository
 	tokenRepo  repositories.TokenRepository
 	jwtService security.JWTService
@@ -28,12 +30,14 @@ type RefreshTokenHandler struct {
 
 // NewRefreshTokenHandler crea una nueva instancia del handler
 func NewRefreshTokenHandler(
+	txManager repositories.TransactionManager,
 	userRepo repositories.UserRepository,
 	tokenRepo repositories.TokenRepository,
 	jwtService security.JWTService,
 	logger *zap.Logger,
 ) *RefreshTokenHandler {
 	return &RefreshTokenHandler{
+		txManager:  txManager,
 		userRepo:   userRepo,
 		tokenRepo:  tokenRepo,
 		jwtService: jwtService,
@@ -61,8 +65,8 @@ func (h *RefreshTokenHandler) Handle(
 	// 2. Hash del token para buscar en BD
 	tokenHash := h.hashToken(command.RefreshToken)
 
-	// 3. Buscar token en BD (verifica que no esté revocado ni expirado)
-	storedToken, err := h.tokenRepo.FindByToken(ctx, tokenHash)
+	// 3. Buscar token en BD INCLUYENDO revocados/expirados, para poder detectar reuso.
+	storedToken, err := h.tokenRepo.FindAnyByTokenHash(ctx, tokenHash)
 	if err != nil {
 		h.logger.Warn("Refresh token no encontrado en BD",
 			zap.String("user_id", userID),
@@ -71,13 +75,35 @@ func (h *RefreshTokenHandler) Handle(
 		return h.unauthorizedResponse("Refresh token inválido o expirado"), nil
 	}
 
-	// 4. Verificar que no esté revocado (doble verificación)
+	// 4. BREACH DETECTION — reuso de un refresh token ya revocado.
+	//    Con rotación de tokens, cada refresh exitoso revoca el token usado. Si un
+	//    token revocado se vuelve a presentar, significa que (a) un atacante robó un
+	//    token y el usuario legítimo ya rotó, o (b) el usuario legítimo presenta uno
+	//    robado/reemplazado. En ambos casos se revoca TODA la familia de tokens del
+	//    usuario para forzar re-login y cortar el acceso del atacante (patrón estándar
+	//    de refresh token rotation reuse detection).
 	if storedToken.IsRevoked {
-		h.logger.Warn("Intento de usar refresh token revocado",
+		h.logger.Error("SECURITY_EVENT: reuso de refresh token revocado — revocando todas las sesiones del usuario",
+			zap.String("security_event", "REFRESH_TOKEN_REUSE"),
+			zap.String("user_id", storedToken.UserID.String()),
+			zap.String("token_id", storedToken.ID.String()),
+		)
+		if err := h.tokenRepo.RevokeAllUserTokens(ctx, storedToken.UserID); err != nil {
+			h.logger.Error("Error revocando todas las sesiones tras detección de reuso",
+				zap.String("user_id", storedToken.UserID.String()),
+				zap.Error(err),
+			)
+		}
+		return h.unauthorizedResponse("Sesión inválida. Por seguridad se cerraron todas las sesiones; vuelve a iniciar sesión"), nil
+	}
+
+	// 4b. Verificar expiración (FindAnyByTokenHash no filtra por expiración).
+	if storedToken.IsExpired() {
+		h.logger.Warn("Refresh token expirado",
 			zap.String("user_id", userID),
 			zap.String("token_id", storedToken.ID.String()),
 		)
-		return h.unauthorizedResponse("Refresh token revocado"), nil
+		return h.unauthorizedResponse("Refresh token inválido o expirado"), nil
 	}
 
 	// 5. Buscar usuario
@@ -110,16 +136,7 @@ func (h *RefreshTokenHandler) Handle(
 		return h.unauthorizedResponse("Usuario inactivo"), nil
 	}
 
-	// 7. Revocar el refresh token viejo
-	if err := h.tokenRepo.RevokeToken(ctx, storedToken.ID); err != nil {
-		h.logger.Error("Error revocando token viejo",
-			zap.String("token_id", storedToken.ID.String()),
-			zap.Error(err),
-		)
-		// Continuar de todas formas - el token nuevo reemplazará al viejo
-	}
-
-	// 8. Generar nuevo access token
+	// 7. Generar nuevo access token (cómputo puro, fuera de transacción)
 	accessToken, accessExpiry, err := h.jwtService.GenerateAccessToken(
 		user.ID.String(),
 		user.Email,
@@ -136,7 +153,7 @@ func (h *RefreshTokenHandler) Handle(
 		), nil
 	}
 
-	// 9. Generar nuevo refresh token
+	// 8. Generar nuevo refresh token (cómputo puro, fuera de transacción)
 	newRefreshToken, refreshExpiry, newTokenID, err := h.jwtService.GenerateRefreshToken(user.ID.String())
 	if err != nil {
 		h.logger.Error("Error generando nuevo refresh token",
@@ -148,20 +165,32 @@ func (h *RefreshTokenHandler) Handle(
 		), nil
 	}
 
-	// 10. Guardar nuevo refresh token en BD
+	// 9. Rotación atómica: revocar el token viejo y persistir el nuevo en una sola
+	//    transacción. Si la creación falla, el rollback mantiene válido el token
+	//    viejo — así un error transitorio de BD no deja al usuario sin sesión ni
+	//    dispara un falso positivo de breach detection en el siguiente intento.
 	newTokenHash := h.hashToken(newRefreshToken)
-	if err := h.tokenRepo.CreateRefreshToken(
-		ctx,
-		user.ID,
-		newTokenID,
-		newTokenHash,
-		refreshExpiry,
-		"", // IP address - se puede obtener del contexto
-		"", // User agent - se puede obtener del contexto
-	); err != nil {
-		h.logger.Error("Error guardando nuevo refresh token",
+	rotateErr := h.txManager.Do(ctx, func(txCtx context.Context) error {
+		if err := h.tokenRepo.RevokeToken(txCtx, storedToken.ID); err != nil {
+			return fmt.Errorf("revocando token viejo: %w", err)
+		}
+		if err := h.tokenRepo.CreateRefreshToken(
+			txCtx,
+			user.ID,
+			newTokenID,
+			newTokenHash,
+			refreshExpiry,
+			"", // IP address - se puede obtener del contexto
+			"", // User agent - se puede obtener del contexto
+		); err != nil {
+			return fmt.Errorf("guardando nuevo refresh token: %w", err)
+		}
+		return nil
+	})
+	if rotateErr != nil {
+		h.logger.Error("Error rotando refresh token (rollback aplicado)",
 			zap.String("user_id", user.ID.String()),
-			zap.Error(err),
+			zap.Error(rotateErr),
 		)
 		return common.InternalServerErrorResponse[responses.LoginResponse](
 			"Error procesando renovación de token",

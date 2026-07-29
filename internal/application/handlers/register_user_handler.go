@@ -22,6 +22,7 @@ const defaultConsentLocale = "es-PE"
 
 // RegisterUserHandler maneja el comando RegisterUserCommand
 type RegisterUserHandler struct {
+	txManager      repositories.TransactionManager
 	userRepo       repositories.UserRepository
 	consentRepo    repositories.ConsentRepository
 	legalDocRepo   repositories.LegalDocumentRepository
@@ -30,6 +31,7 @@ type RegisterUserHandler struct {
 }
 
 func NewRegisterUserHandler(
+	txManager repositories.TransactionManager,
 	userRepo repositories.UserRepository,
 	consentRepo repositories.ConsentRepository,
 	legalDocRepo repositories.LegalDocumentRepository,
@@ -37,6 +39,7 @@ func NewRegisterUserHandler(
 	logger *zap.Logger,
 ) *RegisterUserHandler {
 	return &RegisterUserHandler{
+		txManager:      txManager,
 		userRepo:       userRepo,
 		consentRepo:    consentRepo,
 		legalDocRepo:   legalDocRepo,
@@ -124,24 +127,11 @@ func (h *RegisterUserHandler) Handle(
 		command.Phone,
 	)
 
-	// 5. Guardar usuario
-	if err := h.userRepo.Create(ctx, user); err != nil {
-		h.logger.Error("Error creando usuario en BD",
-			zap.Error(err),
-			zap.String("email", command.Email),
-		)
-		return common.InternalServerErrorResponse[responses.RegisterResponse](
-			"Error creando el usuario",
-		), nil
-	}
-
-	h.logger.Info("Usuario creado exitosamente",
-		zap.String("user_id", user.ID.String()),
-		zap.String("email", user.Email),
-	)
-
-	// 6. Persistir consentimientos LPDP ligados al document_id exacto + hash de integridad.
-	//    La validación ya garantizó que AcceptedTerms == true y AcceptedPrivacy == true.
+	// 5+6. Persistir usuario y consentimientos LPDP atómicamente.
+	//      Antes el usuario se creaba y, si CreateBatch fallaba, quedaba un usuario
+	//      SIN consentimientos legales registrados (violación de trazabilidad LPDP).
+	//      Ahora ambos se escriben en una sola transacción: todo o nada.
+	//      La validación ya garantizó que AcceptedTerms == true y AcceptedPrivacy == true.
 	consents := []*entities.UserConsent{
 		entities.NewUserConsentWithDocument(
 			user.ID, entities.ConsentTypeTermsOfService, termsDoc.Version,
@@ -159,15 +149,30 @@ func (h *RegisterUserHandler) Handle(
 			command.IPAddress, command.UserAgent,
 		),
 	}
-	if err := h.consentRepo.CreateBatch(ctx, consents); err != nil {
-		h.logger.Error("Error persistiendo consentimientos (usuario quedó creado)",
-			zap.Error(err),
-			zap.String("user_id", user.ID.String()),
+
+	txErr := h.txManager.Do(ctx, func(txCtx context.Context) error {
+		if err := h.userRepo.Create(txCtx, user); err != nil {
+			return fmt.Errorf("creando usuario: %w", err)
+		}
+		if err := h.consentRepo.CreateBatch(txCtx, consents); err != nil {
+			return fmt.Errorf("creando consentimientos: %w", err)
+		}
+		return nil
+	})
+	if txErr != nil {
+		h.logger.Error("Error registrando usuario (rollback aplicado)",
+			zap.Error(txErr),
+			zap.String("email", command.Email),
 		)
 		return common.InternalServerErrorResponse[responses.RegisterResponse](
-			"Error registrando los consentimientos legales",
+			"Error creando el usuario",
 		), nil
 	}
+
+	h.logger.Info("Usuario creado exitosamente",
+		zap.String("user_id", user.ID.String()),
+		zap.String("email", user.Email),
+	)
 
 	// Publicar evento de registro (fire-and-forget)
 	go h.publishEvent(context.Background(), events.NewUserRegisteredEvent(

@@ -25,8 +25,15 @@ type TokenRepository interface {
 		userAgent string,
 	) error
 
-	// FindByToken busca un token por su hash
+	// FindByToken busca un token por su hash (solo tokens NO revocados y vigentes)
 	FindByToken(ctx context.Context, tokenHash string) (*entities.RefreshToken, error)
+
+	// FindAnyByTokenHash busca un token por su hash SIN filtrar por estado de
+	// revocación ni expiración. Devuelve la fila tal cual está en BD (incluyendo
+	// revocados/expirados) o ErrTokenNotFound si no existe. Lo usa la detección
+	// de reuso de refresh tokens (breach detection): un token revocado que se
+	// vuelve a presentar es señal de robo.
+	FindAnyByTokenHash(ctx context.Context, tokenHash string) (*entities.RefreshToken, error)
 
 	// RevokeToken revoca un token
 	RevokeToken(ctx context.Context, tokenID uuid.UUID) error

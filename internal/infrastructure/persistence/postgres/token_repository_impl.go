@@ -38,7 +38,7 @@ func (r *TokenRepositoryImpl) Create(ctx context.Context, token *entities.Refres
 		zap.String("user_id", token.UserID.String()),
 	)
 
-	result := r.db.WithContext(ctx).Create(token)
+	result := dbConn(ctx, r.db).Create(token)
 	if result.Error != nil {
 		r.logger.Error("Error creando refresh token",
 			zap.Error(result.Error),
@@ -80,7 +80,7 @@ func (r *TokenRepositoryImpl) CreateRefreshToken(
 		CreatedAt: time.Now(),
 	}
 
-	result := r.db.WithContext(ctx).Create(token)
+	result := dbConn(ctx, r.db).Create(token)
 	if result.Error != nil {
 		r.logger.Error("Error creando refresh token",
 			zap.Error(result.Error),
@@ -102,7 +102,7 @@ func (r *TokenRepositoryImpl) FindByToken(ctx context.Context, tokenHash string)
 	r.logger.Debug("Buscando refresh token por hash")
 
 	var token entities.RefreshToken
-	result := r.db.WithContext(ctx).
+	result := dbConn(ctx, r.db).
 		Where("token_hash = ? AND is_revoked = false", tokenHash).
 		First(&token)
 
@@ -129,6 +129,29 @@ func (r *TokenRepositoryImpl) FindByToken(ctx context.Context, tokenHash string)
 	return &token, nil
 }
 
+// FindAnyByTokenHash busca un token por su hash sin filtrar por revocación ni
+// expiración. Usado por la detección de reuso de refresh tokens.
+func (r *TokenRepositoryImpl) FindAnyByTokenHash(ctx context.Context, tokenHash string) (*entities.RefreshToken, error) {
+	r.logger.Debug("Buscando refresh token por hash (incluyendo revocados)")
+
+	var token entities.RefreshToken
+	result := dbConn(ctx, r.db).
+		Where("token_hash = ?", tokenHash).
+		First(&token)
+
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, ErrTokenNotFound
+		}
+		r.logger.Error("Error buscando refresh token (any)",
+			zap.Error(result.Error),
+		)
+		return nil, fmt.Errorf("error finding refresh token: %w", result.Error)
+	}
+
+	return &token, nil
+}
+
 // RevokeToken revoca un token específico
 func (r *TokenRepositoryImpl) RevokeToken(ctx context.Context, tokenID uuid.UUID) error {
 	r.logger.Debug("Revocando refresh token",
@@ -136,7 +159,7 @@ func (r *TokenRepositoryImpl) RevokeToken(ctx context.Context, tokenID uuid.UUID
 	)
 
 	now := time.Now()
-	result := r.db.WithContext(ctx).
+	result := dbConn(ctx, r.db).
 		Model(&entities.RefreshToken{}).
 		Where("id = ?", tokenID).
 		Updates(map[string]interface{}{
@@ -169,7 +192,7 @@ func (r *TokenRepositoryImpl) RevokeAllUserTokens(ctx context.Context, userID uu
 	)
 
 	now := time.Now()
-	result := r.db.WithContext(ctx).
+	result := dbConn(ctx, r.db).
 		Model(&entities.RefreshToken{}).
 		Where("user_id = ? AND is_revoked = false", userID).
 		Updates(map[string]interface{}{
@@ -197,7 +220,7 @@ func (r *TokenRepositoryImpl) RevokeAllUserTokens(ctx context.Context, userID uu
 func (r *TokenRepositoryImpl) DeleteExpiredTokens(ctx context.Context) (int64, error) {
 	r.logger.Debug("Eliminando tokens expirados")
 
-	result := r.db.WithContext(ctx).
+	result := dbConn(ctx, r.db).
 		Where("expires_at < ?", time.Now()).
 		Delete(&entities.RefreshToken{})
 

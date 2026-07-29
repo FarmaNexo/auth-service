@@ -91,6 +91,7 @@ func main() {
 	consentRepo := postgres.NewConsentRepository(db, logger)
 	legalDocRepo := postgres.NewLegalDocumentRepository(db, logger)
 	legalTypeRepo := postgres.NewLegalDocumentTypeRepository(db, logger)
+	txManager := postgres.NewTransactionManager(db)
 
 	// ========================================
 	// SERVICIOS
@@ -133,6 +134,7 @@ func main() {
 
 	// Register Handler
 	registerUserHandler := handlers.NewRegisterUserHandler(
+		txManager,
 		userRepo,
 		consentRepo,
 		legalDocRepo,
@@ -154,6 +156,7 @@ func main() {
 
 	// Refresh Token Handler
 	refreshTokenHandler := handlers.NewRefreshTokenHandler(
+		txManager,
 		userRepo,
 		tokenRepo,
 		jwtService,

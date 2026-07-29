@@ -38,7 +38,7 @@ func (r *UserRepositoryImpl) Create(ctx context.Context, user *entities.User) er
 		zap.String("email", user.Email),
 	)
 
-	result := r.db.WithContext(ctx).Create(user)
+	result := dbConn(ctx, r.db).Create(user)
 	if result.Error != nil {
 		r.logger.Error("Error creando usuario",
 			zap.Error(result.Error),
@@ -62,7 +62,7 @@ func (r *UserRepositoryImpl) FindByEmail(ctx context.Context, email string) (*en
 	)
 
 	var user entities.User
-	result := r.db.WithContext(ctx).
+	result := dbConn(ctx, r.db).
 		Where("email = ? AND deleted_at IS NULL", email).
 		First(&user)
 
@@ -90,7 +90,7 @@ func (r *UserRepositoryImpl) FindByID(ctx context.Context, id uuid.UUID) (*entit
 	)
 
 	var user entities.User
-	result := r.db.WithContext(ctx).
+	result := dbConn(ctx, r.db).
 		Where("id = ? AND deleted_at IS NULL", id).
 		First(&user)
 
@@ -114,7 +114,7 @@ func (r *UserRepositoryImpl) Update(ctx context.Context, user *entities.User) er
 		zap.String("user_id", user.ID.String()),
 	)
 
-	result := r.db.WithContext(ctx).Save(user)
+	result := dbConn(ctx, r.db).Save(user)
 	if result.Error != nil {
 		r.logger.Error("Error actualizando usuario",
 			zap.Error(result.Error),
@@ -136,7 +136,7 @@ func (r *UserRepositoryImpl) UpdateLoginInfo(ctx context.Context, userID uuid.UU
 		zap.String("user_id", userID.String()),
 	)
 
-	result := r.db.WithContext(ctx).
+	result := dbConn(ctx, r.db).
 		Model(&entities.User{}).
 		Where("id = ?", userID).
 		Updates(map[string]interface{}{
@@ -163,7 +163,7 @@ func (r *UserRepositoryImpl) ExistsByEmail(ctx context.Context, email string) (b
 	)
 
 	var count int64
-	result := r.db.WithContext(ctx).
+	result := dbConn(ctx, r.db).
 		Model(&entities.User{}).
 		Where("email = ? AND deleted_at IS NULL", email).
 		Count(&count)
@@ -185,7 +185,7 @@ func (r *UserRepositoryImpl) Delete(ctx context.Context, userID uuid.UUID) error
 		zap.String("user_id", userID.String()),
 	)
 
-	result := r.db.WithContext(ctx).
+	result := dbConn(ctx, r.db).
 		Delete(&entities.User{}, "id = ?", userID)
 
 	if result.Error != nil {
