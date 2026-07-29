@@ -121,8 +121,10 @@ func (c *AuthController) Login(w http.ResponseWriter, r *http.Request) {
 	req.Sanitize()
 
 	command := commands.LoginCommand{
-		Email:    req.Email,
-		Password: req.Password,
+		Email:     req.Email,
+		Password:  req.Password,
+		IPAddress: extractClientIP(r),
+		UserAgent: r.UserAgent(),
 	}
 
 	response, err := mediator.Send[commands.LoginCommand, responses.LoginResponse](

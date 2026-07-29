@@ -141,8 +141,8 @@ func (h *LoginHandler) Handle(
 		tokenID,
 		tokenHash,
 		refreshExpiry,
-		"", // IP address - se puede obtener del contexto
-		"", // User agent - se puede obtener del contexto
+		command.IPAddress,
+		command.UserAgent,
 	); err != nil {
 		h.logger.Error("Error guardando refresh token",
 			zap.Error(err),
