@@ -9,6 +9,9 @@ import (
 type LoginCommand struct {
 	Email    string
 	Password string
+	// Evidencia legal (LPDP) del contexto de la petición, se persiste con el refresh token.
+	IPAddress string
+	UserAgent string
 }
 
 // GetName retorna el nombre del comando

@@ -35,7 +35,7 @@ func (r *ConsentRepositoryImpl) Create(ctx context.Context, consent *entities.Us
 		zap.Bool("accepted", consent.Accepted),
 	)
 
-	result := r.db.WithContext(ctx).Create(consent)
+	result := dbConn(ctx, r.db).Create(consent)
 	if result.Error != nil {
 		r.logger.Error("Error creando consentimiento",
 			zap.Error(result.Error),
@@ -58,7 +58,7 @@ func (r *ConsentRepositoryImpl) CreateBatch(ctx context.Context, consents []*ent
 		zap.Int("count", len(consents)),
 	)
 
-	result := r.db.WithContext(ctx).Create(&consents)
+	result := dbConn(ctx, r.db).Create(&consents)
 	if result.Error != nil {
 		r.logger.Error("Error creando consentimientos en batch",
 			zap.Error(result.Error),
@@ -74,7 +74,7 @@ func (r *ConsentRepositoryImpl) CreateBatch(ctx context.Context, consents []*ent
 func (r *ConsentRepositoryImpl) FindAllByUserID(ctx context.Context, userID uuid.UUID) ([]*entities.UserConsent, error) {
 	var consents []*entities.UserConsent
 
-	result := r.db.WithContext(ctx).
+	result := dbConn(ctx, r.db).
 		Where("user_id = ?", userID).
 		Order("accepted_at DESC").
 		Find(&consents)
@@ -94,7 +94,7 @@ func (r *ConsentRepositoryImpl) FindAllByUserID(ctx context.Context, userID uuid
 func (r *ConsentRepositoryImpl) FindLatestActive(ctx context.Context, userID uuid.UUID, consentType string) (*entities.UserConsent, error) {
 	var consent entities.UserConsent
 
-	result := r.db.WithContext(ctx).
+	result := dbConn(ctx, r.db).
 		Where("user_id = ? AND consent_type = ? AND withdrawn_at IS NULL", userID, consentType).
 		Order("accepted_at DESC").
 		First(&consent)
@@ -121,7 +121,7 @@ func (r *ConsentRepositoryImpl) WithdrawActive(ctx context.Context, userID uuid.
 		zap.String("consent_type", consentType),
 	)
 
-	result := r.db.WithContext(ctx).
+	result := dbConn(ctx, r.db).
 		Model(&entities.UserConsent{}).
 		Where("user_id = ? AND consent_type = ? AND withdrawn_at IS NULL", userID, consentType).
 		Update("withdrawn_at", gorm.Expr("NOW()"))

@@ -92,6 +92,97 @@ func (c *AuthController) Register(w http.ResponseWriter, r *http.Request) {
 	c.respondJSON(w, response)
 }
 
+// ForgotPassword godoc
+// @Summary      Solicitar restablecimiento de contraseña
+// @Description  Genera un enlace de restablecimiento y lo envía al correo. Responde siempre 200 sin revelar si el correo existe.
+// @Tags         Authentication
+// @Accept       json
+// @Produce      json
+// @Param        request  body      requests.ForgotPasswordRequest  true  "Correo del usuario"
+// @Success      200      {object}  common.ApiResponse[responses.EmptyResponse]  "Solicitud procesada"
+// @Failure      400      {object}  common.ApiResponse[responses.EmptyResponse]  "Error de validación"
+// @Failure      500      {object}  common.ApiResponse[responses.EmptyResponse]  "Error interno del servidor"
+// @Router       /api/v1/auth/forgot-password [post]
+func (c *AuthController) ForgotPassword(w http.ResponseWriter, r *http.Request) {
+	c.logger.Info("POST /api/v1/auth/forgot-password - Solicitud de restablecimiento")
+
+	var req requests.ForgotPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.logger.Warn("Error decodificando request body", zap.Error(err))
+		c.respondJSON(w, common.BadRequestResponse[responses.EmptyResponse](
+			constants.CodeValidationError,
+			"Invalid request body",
+		))
+		return
+	}
+
+	req.Sanitize()
+
+	command := commands.ForgotPasswordCommand{Email: req.Email}
+
+	response, err := mediator.Send[commands.ForgotPasswordCommand, responses.EmptyResponse](
+		r.Context(),
+		c.mediator,
+		command,
+	)
+	if err != nil {
+		c.logger.Error("Error ejecutando ForgotPasswordCommand", zap.Error(err))
+		c.respondJSON(w, common.InternalServerErrorResponse[responses.EmptyResponse](
+			"Error procesando la solicitud",
+		))
+		return
+	}
+
+	c.respondJSON(w, response)
+}
+
+// ResetPassword godoc
+// @Summary      Restablecer contraseña
+// @Description  Restablece la contraseña usando un token válido recibido por correo. Revoca todas las sesiones activas.
+// @Tags         Authentication
+// @Accept       json
+// @Produce      json
+// @Param        request  body      requests.ResetPasswordRequest  true  "Token y nueva contraseña"
+// @Success      200      {object}  common.ApiResponse[responses.EmptyResponse]  "Contraseña actualizada"
+// @Failure      400      {object}  common.ApiResponse[responses.EmptyResponse]  "Token inválido o expirado"
+// @Failure      500      {object}  common.ApiResponse[responses.EmptyResponse]  "Error interno del servidor"
+// @Router       /api/v1/auth/reset-password [post]
+func (c *AuthController) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	c.logger.Info("POST /api/v1/auth/reset-password - Restablecimiento de contraseña")
+
+	var req requests.ResetPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		c.logger.Warn("Error decodificando request body", zap.Error(err))
+		c.respondJSON(w, common.BadRequestResponse[responses.EmptyResponse](
+			constants.CodeValidationError,
+			"Invalid request body",
+		))
+		return
+	}
+
+	req.Sanitize()
+
+	command := commands.ResetPasswordCommand{
+		Token:       req.Token,
+		NewPassword: req.NewPassword,
+	}
+
+	response, err := mediator.Send[commands.ResetPasswordCommand, responses.EmptyResponse](
+		r.Context(),
+		c.mediator,
+		command,
+	)
+	if err != nil {
+		c.logger.Error("Error ejecutando ResetPasswordCommand", zap.Error(err))
+		c.respondJSON(w, common.InternalServerErrorResponse[responses.EmptyResponse](
+			"Error procesando la solicitud",
+		))
+		return
+	}
+
+	c.respondJSON(w, response)
+}
+
 // Login godoc
 // @Summary      Iniciar sesión
 // @Description  Autentica un usuario y retorna tokens de acceso SIN datos de usuario
@@ -121,8 +212,10 @@ func (c *AuthController) Login(w http.ResponseWriter, r *http.Request) {
 	req.Sanitize()
 
 	command := commands.LoginCommand{
-		Email:    req.Email,
-		Password: req.Password,
+		Email:     req.Email,
+		Password:  req.Password,
+		IPAddress: extractClientIP(r),
+		UserAgent: r.UserAgent(),
 	}
 
 	response, err := mediator.Send[commands.LoginCommand, responses.LoginResponse](

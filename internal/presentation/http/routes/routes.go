@@ -83,6 +83,8 @@ func SetupRoutes(
 			r.Post("/register", authController.Register)
 			r.Post("/login", authController.Login)
 			r.With(rateLimitMiddleware.RefreshRateLimit).Post("/refresh", authController.RefreshToken)
+			r.Post("/forgot-password", authController.ForgotPassword)
+			r.Post("/reset-password", authController.ResetPassword)
 
 			// Rutas protegidas (requieren autenticación)
 			r.Group(func(r chi.Router) {
