@@ -14,7 +14,9 @@ import (
 	"github.com/farmanexo/auth-service/internal/application/handlers"
 	"github.com/farmanexo/auth-service/internal/application/postprocessors"
 	"github.com/farmanexo/auth-service/internal/application/validators"
+	"github.com/farmanexo/auth-service/internal/domain/services"
 	"github.com/farmanexo/auth-service/internal/infrastructure/cache"
+	"github.com/farmanexo/auth-service/internal/infrastructure/email"
 	"github.com/farmanexo/auth-service/internal/infrastructure/messaging"
 	"github.com/farmanexo/auth-service/internal/infrastructure/persistence/postgres"
 	"github.com/farmanexo/auth-service/internal/infrastructure/security"
@@ -60,6 +62,14 @@ import (
 // @tag.name         Health
 // @tag.description  Endpoints de salud del servicio
 
+// getenvDefault devuelve el valor de la variable de entorno o el default si está vacía.
+func getenvDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
 func main() {
 	env := getEnvironment()
 	cfg, err := config.LoadConfig(env)
@@ -91,6 +101,7 @@ func main() {
 	consentRepo := postgres.NewConsentRepository(db, logger)
 	legalDocRepo := postgres.NewLegalDocumentRepository(db, logger)
 	legalTypeRepo := postgres.NewLegalDocumentTypeRepository(db, logger)
+	passwordResetRepo := postgres.NewPasswordResetTokenRepository(db, logger)
 	txManager := postgres.NewTransactionManager(db)
 
 	// ========================================
@@ -103,6 +114,36 @@ func main() {
 		cfg.JWT.Issuer,
 		logger,
 	)
+
+	// EmailService: el proveedor se elige con EMAIL_PROVIDER.
+	//  - "ses"  (Dev/Prod): Amazon SES vía SDK, credenciales del rol IAM del task.
+	//  - "smtp" (local, default): SMTP contra Mailpit (localhost:1025); los correos
+	//    quedan en su bandeja web http://localhost:8025. Si SMTP_HOST se vacía, cae a log.
+	frontendURL := getenvDefault("FRONTEND_URL", "http://localhost:3000")
+	var emailService services.EmailService
+	switch getenvDefault("EMAIL_PROVIDER", "smtp") {
+	case "ses":
+		sesFrom := getenvDefault("SES_FROM", getenvDefault("SMTP_FROM", "no-reply@farmanexo.com.pe"))
+		sesSvc, sesErr := email.NewSESEmailService(context.Background(), cfg.AWS.Region, sesFrom, frontendURL, logger)
+		if sesErr != nil {
+			logger.Fatal("Error inicializando SES EmailService", zap.Error(sesErr))
+		}
+		emailService = sesSvc
+	default:
+		if smtpHost := getenvDefault("SMTP_HOST", "localhost"); smtpHost != "" {
+			emailService = email.NewSMTPEmailService(
+				smtpHost,
+				getenvDefault("SMTP_PORT", "1025"),
+				getenvDefault("SMTP_FROM", "no-reply@farmanexo.local"),
+				os.Getenv("SMTP_USER"),
+				os.Getenv("SMTP_PASS"),
+				frontendURL,
+				logger,
+			)
+		} else {
+			emailService = email.NewLogEmailService(frontendURL, logger)
+		}
+	}
 
 	// ========================================
 	// REDIS
@@ -163,6 +204,25 @@ func main() {
 		logger,
 	)
 	mediator.RegisterHandler(med, refreshTokenHandler)
+
+	// Forgot Password Handler
+	forgotPasswordHandler := handlers.NewForgotPasswordHandler(
+		userRepo,
+		passwordResetRepo,
+		emailService,
+		logger,
+	)
+	mediator.RegisterHandler(med, forgotPasswordHandler)
+
+	// Reset Password Handler
+	resetPasswordHandler := handlers.NewResetPasswordHandler(
+		txManager,
+		userRepo,
+		passwordResetRepo,
+		tokenRepo,
+		logger,
+	)
+	mediator.RegisterHandler(med, resetPasswordHandler)
 
 	// Logout Handler
 	logoutHandler := handlers.NewLogoutHandler(
