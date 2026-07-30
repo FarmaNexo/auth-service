@@ -16,30 +16,34 @@ import (
 // se toman de la cadena por defecto (el rol IAM del task ECS), sin secretos de larga
 // vida. Se usa en Dev/Prod; en local se usa SMTP contra Mailpit.
 type SESEmailService struct {
-	client      *sesv2.Client
-	from        string
-	frontendURL string
-	logger      *zap.Logger
+	client           *sesv2.Client
+	from             string
+	frontendURL      string
+	configurationSet string
+	logger           *zap.Logger
 }
 
-// NewSESEmailService crea el servicio de correo sobre SES.
-func NewSESEmailService(ctx context.Context, region, from, frontendURL string, logger *zap.Logger) (*SESEmailService, error) {
+// NewSESEmailService crea el servicio de correo sobre SES. configurationSet es opcional:
+// si se indica, cada envío se asocia a esa configuration set (tracking de bounces/quejas
+// independiente de la config por defecto de la identidad).
+func NewSESEmailService(ctx context.Context, region, from, frontendURL, configurationSet string, logger *zap.Logger) (*SESEmailService, error) {
 	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
 	if err != nil {
 		return nil, fmt.Errorf("error cargando configuración AWS para SES: %w", err)
 	}
 	return &SESEmailService{
-		client:      sesv2.NewFromConfig(cfg),
-		from:        from,
-		frontendURL: frontendURL,
-		logger:      logger,
+		client:           sesv2.NewFromConfig(cfg),
+		from:             from,
+		frontendURL:      frontendURL,
+		configurationSet: configurationSet,
+		logger:           logger,
 	}, nil
 }
 
 func (s *SESEmailService) SendPasswordReset(ctx context.Context, toEmail string, resetToken string) error {
-	subject, htmlBody := passwordResetContent(s.frontendURL, resetToken)
+	subject, htmlBody, textBody := passwordResetContent(s.frontendURL, resetToken)
 
-	_, err := s.client.SendEmail(ctx, &sesv2.SendEmailInput{
+	input := &sesv2.SendEmailInput{
 		FromEmailAddress: aws.String(s.from),
 		Destination: &types.Destination{
 			ToAddresses: []string{toEmail},
@@ -49,11 +53,16 @@ func (s *SESEmailService) SendPasswordReset(ctx context.Context, toEmail string,
 				Subject: &types.Content{Data: aws.String(subject)},
 				Body: &types.Body{
 					Html: &types.Content{Data: aws.String(htmlBody)},
+					Text: &types.Content{Data: aws.String(textBody)},
 				},
 			},
 		},
-	})
-	if err != nil {
+	}
+	if s.configurationSet != "" {
+		input.ConfigurationSetName = aws.String(s.configurationSet)
+	}
+
+	if _, err := s.client.SendEmail(ctx, input); err != nil {
 		s.logger.Error("Error enviando correo de restablecimiento vía SES",
 			zap.String("to", toEmail),
 			zap.Error(err),

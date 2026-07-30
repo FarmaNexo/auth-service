@@ -27,6 +27,7 @@ type ForgotPasswordHandler struct {
 	userRepo     repositories.UserRepository
 	resetRepo    repositories.PasswordResetTokenRepository
 	emailService services.EmailService
+	rateLimiter  services.RateLimiter
 	logger       *zap.Logger
 }
 
@@ -35,15 +36,23 @@ func NewForgotPasswordHandler(
 	userRepo repositories.UserRepository,
 	resetRepo repositories.PasswordResetTokenRepository,
 	emailService services.EmailService,
+	rateLimiter services.RateLimiter,
 	logger *zap.Logger,
 ) *ForgotPasswordHandler {
 	return &ForgotPasswordHandler{
 		userRepo:     userRepo,
 		resetRepo:    resetRepo,
 		emailService: emailService,
+		rateLimiter:  rateLimiter,
 		logger:       logger,
 	}
 }
+
+// forgotRateLimit define cuántas solicitudes de reset se permiten por email y ventana.
+const (
+	forgotRateLimitMax    = 5
+	forgotRateLimitWindow = time.Hour
+)
 
 // Handle procesa el comando de forgot-password.
 func (h *ForgotPasswordHandler) Handle(
@@ -54,6 +63,19 @@ func (h *ForgotPasswordHandler) Handle(
 	h.logger.Info("Procesando solicitud de restablecimiento de contraseña",
 		zap.String("email", command.Email),
 	)
+
+	// Rate limit por email para frenar abuso (email bombing). El WAF cubre el vector
+	// por-IP; esto cubre el distribuido. Fail-open si Redis cae (igual que login).
+	rlKey := "ratelimit:forgot:" + command.Email
+	if rl, rlErr := h.rateLimiter.Check(ctx, rlKey, forgotRateLimitMax, forgotRateLimitWindow); rlErr != nil {
+		h.logger.Warn("Error verificando rate limit de forgot-password (fail-open)",
+			zap.String("email", command.Email), zap.Error(rlErr))
+	} else if !rl.Allowed {
+		h.logger.Warn("Rate limit de forgot-password excedido", zap.String("email", command.Email))
+		return common.TooManyRequestsResponse[responses.EmptyResponse](
+			"Demasiadas solicitudes. Intenta de nuevo en unos minutos.",
+		), nil
+	}
 
 	// La respuesta es idéntica exista o no el usuario, para no filtrar qué correos
 	// están registrados (anti-enumeración).

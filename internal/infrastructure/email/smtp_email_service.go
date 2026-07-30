@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/smtp"
+	"strings"
 
 	"github.com/farmanexo/auth-service/internal/domain/services"
 	"go.uber.org/zap"
@@ -36,8 +37,8 @@ func NewSMTPEmailService(host, port, from, username, password, frontendURL strin
 }
 
 func (s *SMTPEmailService) SendPasswordReset(ctx context.Context, toEmail string, resetToken string) error {
-	subject, htmlBody := passwordResetContent(s.frontendURL, resetToken)
-	msg := s.buildMessage(toEmail, subject, htmlBody)
+	subject, htmlBody, textBody := passwordResetContent(s.frontendURL, resetToken)
+	msg := s.buildMessage(toEmail, subject, textBody, htmlBody)
 	addr := fmt.Sprintf("%s:%s", s.host, s.port)
 
 	// La autenticación solo se usa si hay credenciales (Mailpit local no las requiere).
@@ -62,14 +63,27 @@ func (s *SMTPEmailService) SendPasswordReset(ctx context.Context, toEmail string
 	return nil
 }
 
-// buildMessage arma el mensaje RFC 822 con cuerpo HTML.
-func (s *SMTPEmailService) buildMessage(to, subject, htmlBody string) []byte {
-	headers := fmt.Sprintf("From: %s\r\n", s.from)
-	headers += fmt.Sprintf("To: %s\r\n", to)
-	headers += fmt.Sprintf("Subject: %s\r\n", subject)
-	headers += "MIME-Version: 1.0\r\n"
-	headers += "Content-Type: text/html; charset=\"UTF-8\"\r\n"
-	return []byte(headers + "\r\n" + htmlBody)
+// buildMessage arma un mensaje RFC 822 multipart/alternative con parte de texto plano
+// y parte HTML (la parte de texto mejora la entregabilidad).
+func (s *SMTPEmailService) buildMessage(to, subject, textBody, htmlBody string) []byte {
+	const boundary = "farmanexo-alt-boundary"
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("From: %s\r\n", s.from))
+	b.WriteString(fmt.Sprintf("To: %s\r\n", to))
+	b.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
+	b.WriteString("MIME-Version: 1.0\r\n")
+	b.WriteString(fmt.Sprintf("Content-Type: multipart/alternative; boundary=\"%s\"\r\n\r\n", boundary))
+
+	b.WriteString(fmt.Sprintf("--%s\r\n", boundary))
+	b.WriteString("Content-Type: text/plain; charset=\"UTF-8\"\r\n\r\n")
+	b.WriteString(textBody + "\r\n\r\n")
+
+	b.WriteString(fmt.Sprintf("--%s\r\n", boundary))
+	b.WriteString("Content-Type: text/html; charset=\"UTF-8\"\r\n\r\n")
+	b.WriteString(htmlBody + "\r\n\r\n")
+
+	b.WriteString(fmt.Sprintf("--%s--\r\n", boundary))
+	return []byte(b.String())
 }
 
 var _ services.EmailService = (*SMTPEmailService)(nil)

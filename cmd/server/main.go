@@ -124,7 +124,7 @@ func main() {
 	switch getenvDefault("EMAIL_PROVIDER", "smtp") {
 	case "ses":
 		sesFrom := getenvDefault("SES_FROM", getenvDefault("SMTP_FROM", "no-reply@farmanexo.com.pe"))
-		sesSvc, sesErr := email.NewSESEmailService(context.Background(), cfg.AWS.Region, sesFrom, frontendURL, logger)
+		sesSvc, sesErr := email.NewSESEmailService(context.Background(), cfg.AWS.Region, sesFrom, frontendURL, getenvDefault("SES_CONFIGURATION_SET", ""), logger)
 		if sesErr != nil {
 			logger.Fatal("Error inicializando SES EmailService", zap.Error(sesErr))
 		}
@@ -210,6 +210,7 @@ func main() {
 		userRepo,
 		passwordResetRepo,
 		emailService,
+		rateLimiter,
 		logger,
 	)
 	mediator.RegisterHandler(med, forgotPasswordHandler)
